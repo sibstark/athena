@@ -77,6 +77,29 @@ Normal links to external web pages remain links. Images and links that look like
 
 The exporter first writes to a temporary directory. A completed snapshot is moved into place only after all Bitrix documents have been received. Bitrix's `truncated` tree response is treated as a fatal error to prevent an incomplete export from looking successful.
 
+## Normalize Markdown for RAG
+
+Normalization is a separate step and does not change the Bitrix export. It first scans Markdown files and directories to reconstruct the exported page tree, then removes YAML Front Matter from document content and normalizes formatting outside code blocks. The result is ready for later chunking and indexing; this step does not create embeddings.
+
+```bash
+bun run cli -- normalize \
+  --input exports/mental-arithmetic/content \
+  --output normalized/mental-arithmetic/normalized.jsonl \
+  --tree normalized/mental-arithmetic/document_tree.json \
+  --report normalized/mental-arithmetic/report.json \
+  --short-note-threshold 200
+```
+
+Use `--force` to replace existing results. When omitted, `document_tree.json` and `report.json` are created next to the JSONL file.
+
+Example JSONL line:
+
+```json
+{"document_id":"page_3693","parent_document_id":"page_3663","content":"# Сценарий урока\n\nТекст","metadata":{"title":"МЕ.0.2. 3. Цифра 6","source":"ментальная-арифметика-new--3035/уровень--3499/раздел--3663/урок--3693.md","page_id":"3693","parent_page_id":"3663","root_page_id":"3035","depth":3,"ancestor_ids":["3035","3499","3663"],"breadcrumbs":["Ментальная арифметика New","Уровень","Раздел","МЕ.0.2. 3. Цифра 6"],"context_text":"Ментальная арифметика New → Уровень → Раздел → МЕ.0.2. 3. Цифра 6","document_type":"short_note","indexable":true,"external_urls":[],"assets":[],"character_count":30,"word_count":4,"heading_count":1,"external_url_count":0,"asset_count":0,"version":null,"date":null,"category":null,"status":"active","language":"ru"},"content_hash":"<sha256>"}
+```
+
+Page IDs encoded as `--1234` in file and directory names become stable IDs such as `page_1234`; files without a page ID use a hash of their relative source path. `content_hash` depends only on normalized Markdown. Exact duplicates remain in JSONL and receive `metadata.duplicate_of`, preserving their navigation position. Empty documents are omitted, external-link-only documents are marked non-indexable, and per-file errors do not stop the remaining import. `document_tree.json` also contains virtual directory nodes that have no Markdown document.
+
 ## Development
 
 ```bash

@@ -4,5 +4,6 @@ dist/
 .DS_Store
 coverage/
 exports/
+normalized/
 *.log
 .idea

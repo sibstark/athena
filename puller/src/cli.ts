@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { BitrixApiError, BitrixClient } from "./bitrix/client.js";
 import { parsePositiveInteger, requireWebhookUrl, resolveOutputDir } from "./config.js";
 import { exportCollection } from "./exporter.js";
+import { normalizeDirectory } from "./normalizer.js";
 
 const program = new Command()
   .name("athena")
@@ -67,6 +68,64 @@ program
       if (summary.assetsFailed > 0) {
         console.log("See report.json for resources that could not be downloaded.");
       }
+    },
+  );
+
+program
+  .command("normalize")
+  .description("Normalize Markdown files into deterministic JSONL for RAG ingestion")
+  .requiredOption("-i, --input <directory>", "directory containing Markdown files")
+  .requiredOption("-o, --output <file>", "target JSONL file")
+  .option("-t, --tree <file>", "document tree (defaults next to JSONL)")
+  .option("-r, --report <file>", "normalization report (defaults next to JSONL)")
+  .option(
+    "--short-note-threshold <characters>",
+    "useful-text character threshold for short notes",
+    parsePositiveInteger,
+    200,
+  )
+  .option("--force", "replace existing JSONL, tree, and report files", false)
+  .action(
+    async (options: {
+      input: string;
+      output: string;
+      tree?: string;
+      report?: string;
+      shortNoteThreshold: number;
+      force: boolean;
+    }) => {
+      const result = await normalizeDirectory({
+        inputDir: resolveOutputDir(options.input),
+        outputFile: resolveOutputDir(options.output),
+        ...(options.tree ? { treeFile: resolveOutputDir(options.tree) } : {}),
+        ...(options.report ? { reportFile: resolveOutputDir(options.report) } : {}),
+        shortNoteThreshold: options.shortNoteThreshold,
+        force: options.force,
+        onProgress: (message) => console.log(message),
+      });
+
+      console.log("");
+      console.log("Normalization complete");
+      console.log(`Found Markdown files: ${result.report.found_files}`);
+      console.log(
+        `Tree nodes: ${result.report.tree_nodes} (${result.report.virtual_nodes} virtual)`,
+      );
+      console.log(`Documents written: ${result.report.processed_documents}`);
+      console.log(`Root documents: ${result.report.root_documents}`);
+      console.log(`Maximum depth: ${result.report.max_depth}`);
+      console.log(`Empty files: ${result.report.empty_files}`);
+      console.log(`Short notes: ${result.report.short_documents}`);
+      console.log(`External-link documents: ${result.report.external_link_documents}`);
+      console.log(`Images: ${result.report.images}`);
+      console.log(`External links: ${result.report.external_links}`);
+      console.log(`Duplicates: ${result.report.duplicate_files}`);
+      console.log(`Files without page ID: ${result.report.files_without_page_id}`);
+      console.log(`Files without title: ${result.report.files_without_title}`);
+      console.log(`Tree errors: ${result.report.tree_errors}`);
+      console.log(`Processing errors: ${result.report.processing_errors}`);
+      console.log(`JSONL: ${result.outputFile}`);
+      console.log(`Tree: ${result.treeFile}`);
+      console.log(`Report: ${result.reportFile}`);
     },
   );
 
