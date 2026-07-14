@@ -7,9 +7,18 @@ export interface BitrixTimeInfo {
 
 export interface BitrixEnvelope<T> {
   result?: T;
-  error?: string;
+  error?: string | BitrixV3Error;
   error_description?: string;
   time?: BitrixTimeInfo;
+}
+
+export interface BitrixV3Error {
+  code: string;
+  message: string;
+  validation?: Array<{
+    field?: string;
+    message: string;
+  }>;
 }
 
 export interface CollectionCursor {

@@ -28,6 +28,9 @@ describe("BitrixClient", () => {
     const result = await client.listCollections();
 
     expect(result.map((item) => item.id)).toEqual([17, 18]);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://example.bitrix24.ru/rest/api/1/secret/note.collection.list",
+    );
     const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
       pagination: { afterCursor: { id: number } };
     };
@@ -68,6 +71,29 @@ describe("BitrixClient", () => {
     expect(error).toBeInstanceOf(BitrixApiError);
     expect(String(error)).not.toContain("/secret/");
     expect(String(error)).toContain("[REDACTED]");
+  });
+
+  it("understands the REST 3.0 error envelope", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          error: {
+            code: "BITRIX_REST_V3_EXCEPTION_VALIDATION_REQUESTVALIDATIONEXCEPTION",
+            message: "Validation failed",
+            validation: [{ field: "id", message: "Required field" }],
+          },
+        },
+        400,
+      ),
+    );
+    const client = new BitrixClient("https://example.bitrix24.ru/rest/1/secret/", {
+      fetch: fetchMock,
+    });
+
+    await expect(client.listCollections()).rejects.toMatchObject({
+      code: "BITRIX_REST_V3_EXCEPTION_VALIDATION_REQUESTVALIDATIONEXCEPTION",
+      message: expect.stringContaining("id: Required field"),
+    });
   });
 });
 

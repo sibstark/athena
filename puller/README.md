@@ -1,10 +1,10 @@
-# Athena Bitrix24 exporter
+# Athena Puller Bitrix24 exporter
 
 TypeScript CLI for exporting a Bitrix24 Knowledge Base 2.0 collection to files that are convenient for later parsing. The default target is **[M] Ментальная арифметика**, collection `17`:
 
 `https://hwschool.bitrix24.ru/note/workspace/17/`
 
-The exporter uses the official `note.collection.list`, `note.document.tree.list`, and `note.document.get` REST methods. It does not automate a browser and does not store your Bitrix24 password.
+The exporter uses the official REST 3.0 methods `note.collection.list`, `note.document.tree.list`, and `note.document.get`. It does not automate a browser and does not store your Bitrix24 password. A standard `/rest/USER_ID/SECRET/` webhook URL is automatically converted to the REST 3.0 `/rest/api/USER_ID/SECRET/` endpoint.
 
 ## Requirements
 

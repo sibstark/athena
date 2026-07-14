@@ -10,6 +10,14 @@ describe("configuration", () => {
     ).toBe("https://hwschool.bitrix24.ru/rest/12/a-secret/");
   });
 
+  it("accepts a REST 3.0 webhook URL", () => {
+    expect(
+      requireWebhookUrl({
+        BITRIX_WEBHOOK_URL: "https://hwschool.bitrix24.ru/rest/api/12/a-secret/",
+      }),
+    ).toBe("https://hwschool.bitrix24.ru/rest/api/12/a-secret/");
+  });
+
   it("rejects malformed webhook URLs", () => {
     expect(() => requireWebhookUrl({ BITRIX_WEBHOOK_URL: "https://example.com/" })).toThrow(
       "must look like",

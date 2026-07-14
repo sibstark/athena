@@ -24,9 +24,10 @@ export function requireWebhookUrl(env: NodeJS.ProcessEnv = process.env): string 
   if (url.protocol !== "https:" && url.hostname !== "localhost") {
     throw new Error("BITRIX_WEBHOOK_URL must use HTTPS.");
   }
-  if (!/^\/rest\/[^/]+\/[^/]+\/?$/.test(url.pathname)) {
+  if (!/^\/rest\/(?:api\/)?[^/]+\/[^/]+\/?$/.test(url.pathname)) {
     throw new Error(
-      "BITRIX_WEBHOOK_URL must look like https://portal.bitrix24.ru/rest/USER_ID/WEBHOOK_SECRET/.",
+      "BITRIX_WEBHOOK_URL must look like https://portal.bitrix24.ru/rest/USER_ID/WEBHOOK_SECRET/ " +
+        "or https://portal.bitrix24.ru/rest/api/USER_ID/WEBHOOK_SECRET/.",
     );
   }
 

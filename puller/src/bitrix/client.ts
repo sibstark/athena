@@ -37,12 +37,19 @@ export class BitrixClient {
 
   constructor(webhookUrl: string, options: BitrixClientOptions = {}) {
     const parsed = new URL(webhookUrl);
-    this.baseUrl = parsed.toString().replace(/\/?$/, "/");
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    const hasApiSegment = pathParts[1] === "api";
+    const userId = pathParts[hasApiSegment ? 2 : 1];
+    const secret = pathParts[hasApiSegment ? 3 : 2];
+    if (pathParts[0] !== "rest" || !userId || !secret) {
+      throw new Error("Invalid Bitrix24 webhook URL.");
+    }
+    this.baseUrl = `${parsed.origin}/rest/api/${userId}/${secret}/`;
     this.portalOrigin = parsed.origin;
     this.fetchImpl = options.fetch ?? fetch;
     this.sleep = options.sleep ?? defaultSleep;
     this.maxAttempts = options.maxAttempts ?? 4;
-    this.secret = parsed.pathname.split("/").filter(Boolean).at(-1) ?? "";
+    this.secret = secret;
   }
 
   redact(value: string): string {
@@ -51,7 +58,7 @@ export class BitrixClient {
   }
 
   async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-    const endpoint = new URL(`${method}.json`, this.baseUrl);
+    const endpoint = new URL(method, this.baseUrl);
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       let response: Response;
@@ -94,8 +101,19 @@ export class BitrixClient {
       }
 
       if (!response.ok || envelope.error) {
-        const code = envelope.error ?? `HTTP_${response.status}`;
-        const description = envelope.error_description ?? response.statusText;
+        const v3Error =
+          envelope.error && typeof envelope.error === "object" ? envelope.error : undefined;
+        const code =
+          v3Error?.code ??
+          (typeof envelope.error === "string" ? envelope.error : undefined) ??
+          `HTTP_${response.status}`;
+        const validation = v3Error?.validation
+          ?.map((item) => `${item.field ? `${item.field}: ` : ""}${item.message}`)
+          .join("; ");
+        const description =
+          [v3Error?.message, validation].filter(Boolean).join(" — ") ||
+          envelope.error_description ||
+          response.statusText;
         throw new BitrixApiError(
           `${method} failed: ${this.redact(description)} (${code})`,
           code,

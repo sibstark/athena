@@ -94,7 +94,7 @@ function createApiFetch(truncated: boolean): typeof fetch {
       }
     }
 
-    const method = url.pathname.split("/").at(-1)?.replace(/\.json$/, "");
+    const method = url.pathname.split("/").at(-1);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     if (method === "note.collection.list") {
       return jsonResponse({
