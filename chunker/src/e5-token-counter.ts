@@ -12,6 +12,11 @@ export async function createE5TokenCounter(options: {
   cacheDir: string;
   offline: boolean;
 }): Promise<TokenCounter> {
+  if (options.modelId !== DEFAULT_TOKENIZER || options.revision !== DEFAULT_TOKENIZER_REVISION) {
+    throw new Error(
+      `Athena requires tokenizer ${DEFAULT_TOKENIZER}@${DEFAULT_TOKENIZER_REVISION}; got ${options.modelId}@${options.revision}.`,
+    );
+  }
   const cacheDir = resolve(options.cacheDir);
   await mkdir(cacheDir, { recursive: true });
   try {

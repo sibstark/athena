@@ -1,0 +1,8 @@
+{
+  "image": "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9",
+  "digest": "sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
+  "image_id": "sha256:f50bc806338120e138d774236098580f7e5840dbe8bc001ef64615847c1685e8",
+  "verified_tei_version": "1.9.3",
+  "platform": "linux/amd64",
+  "note": "The documented cpu-arm64-1.9 tag returned manifest unknown on 2026-07-16; the official amd64 image is used under Docker emulation."
+}

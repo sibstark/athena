@@ -50,6 +50,9 @@ export function resolveIndexerConfig(
   input: CliConfigInput,
   env: NodeJS.ProcessEnv = process.env,
 ): IndexerConfig {
+  const modelId = env.EMBEDDING_MODEL?.trim() || DEFAULT_MODEL;
+  const modelRevision = env.EMBEDDING_MODEL_REVISION?.trim() || DEFAULT_MODEL_REVISION;
+  assertPinnedModel(modelId, modelRevision);
   const collection = input.collection ?? env.QDRANT_COLLECTION?.trim() ?? DEFAULT_COLLECTION;
   const inputFile = resolve(input.input);
   const reportFile = resolve(
@@ -62,8 +65,8 @@ export function resolveIndexerConfig(
     qdrantUrl: input.qdrantUrl ?? env.QDRANT_URL?.trim() ?? "http://127.0.0.1:6333",
     ...(env.QDRANT_API_KEY?.trim() ? { qdrantApiKey: env.QDRANT_API_KEY.trim() } : {}),
     batchSize: input.batchSize ?? readPositiveInteger(env.INDEXER_BATCH_SIZE, 16),
-    modelId: env.EMBEDDING_MODEL?.trim() || DEFAULT_MODEL,
-    modelRevision: env.EMBEDDING_MODEL_REVISION?.trim() || DEFAULT_MODEL_REVISION,
+    modelId,
+    modelRevision,
     dtype: env.EMBEDDING_DTYPE?.trim() || DEFAULT_DTYPE,
     dimension: DEFAULT_DIMENSION,
     pipelineVersion: env.EMBEDDING_PIPELINE_VERSION?.trim() || DEFAULT_PIPELINE_VERSION,
@@ -77,6 +80,14 @@ export function resolveIndexerConfig(
     continueOnError: Boolean(input.continueOnError),
     logLevel: input.logLevel ?? parseLogLevel(env.LOG_LEVEL),
   };
+}
+
+function assertPinnedModel(modelId: string, revision: string): void {
+  if (modelId !== DEFAULT_MODEL || revision !== DEFAULT_MODEL_REVISION) {
+    throw new Error(
+      `Athena requires ${DEFAULT_MODEL}@${DEFAULT_MODEL_REVISION}; got ${modelId}@${revision}. Use a separate collection and explicit migration for another model.`,
+    );
+  }
 }
 
 function safeCollectionName(value: string): string {

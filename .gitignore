@@ -3,6 +3,7 @@
 .idea/
 data/
 var/
+reports/
 *.log
 **/node_modules/
 **/dist/

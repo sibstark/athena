@@ -1,0 +1,19 @@
+{
+  "name": "athena",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "bun@1.3.0",
+  "scripts": {
+    "db:up": "docker compose up -d qdrant",
+    "db:down": "docker compose stop qdrant",
+    "db:logs": "docker compose logs -f qdrant",
+    "db:status": "docker compose ps qdrant",
+    "tei:prepare": "bun tei/src/prepare-model.ts",
+    "tei:up": "bun run tei:prepare && docker compose up -d --force-recreate embeddings",
+    "tei:down": "docker compose stop embeddings",
+    "tei:logs": "docker compose logs -f embeddings",
+    "tei:status": "docker compose ps embeddings",
+    "rag:search:tei": "bun tei/src/cli-search.ts",
+    "rag:compat:tei": "bun tei/src/cli-compat.ts"
+  }
+}

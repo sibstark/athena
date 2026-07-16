@@ -1,18 +1,22 @@
 # Athena
 
-Репозиторий состоит из четырёх независимых Bun/TypeScript CLI и общей инфраструктуры данных:
+Репозиторий состоит из пяти независимых проектов и общей инфраструктуры данных:
 
 ```text
 puller/      Bitrix24 → Markdown
 normalizer/  Markdown → normalized.jsonl + document_tree.json
 chunker/     normalized.jsonl → chunks.jsonl
 indexer/     chunks.jsonl → local E5 embeddings → Qdrant
+tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
 data/        общие входные и выходные данные (не в Git)
 var/models/  общий кеш моделей (не в Git)
 var/qdrant/  данные Qdrant (не в Git)
+var/tei/     кеш модели TEI (не в Git)
 ```
 
 CLI не вызывают друг друга автоматически. В каждом каталоге свой `package.json`, `bun.lock` и набор зависимостей. `puller` не содержит Docker Compose и кода Qdrant.
+
+Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
 
 ## Общий Qdrant
 
@@ -27,6 +31,19 @@ docker compose down
 ```
 
 Qdrant доступен только на `127.0.0.1:${QDRANT_PORT:-6333}`. Данные и snapshots сохраняются в `var/qdrant/`. Версия образа закреплена через `QDRANT_VERSION`.
+
+## Rust TEI
+
+TEI работает отдельным официальным Rust-контейнером, а `tei/` содержит только Bun/TypeScript HTTP-клиенты и read-only проверки:
+
+```bash
+bun run tei:up
+bun run tei:status
+bun run tei:logs
+bun run tei:down
+```
+
+Подробности, smoke search и compatibility test: [tei/README.md](tei/README.md).
 
 ## Полный ручной workflow
 

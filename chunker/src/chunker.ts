@@ -693,7 +693,7 @@ function expandBlocks(
       continue;
     }
     if (block.kind === "list_item") {
-      units.push({ ...block, forceOwn: true, oversizedReason: "list_item" });
+      units.push(...splitListItem(document, section, block.raw, options));
       continue;
     }
     if (block.kind === "html") {
@@ -707,6 +707,43 @@ function expandBlocks(
     units.push({ ...block, forceOwn: true, oversizedReason: "context_prefix" });
   }
   return units;
+}
+
+function splitListItem(
+  document: NormalizedDocument,
+  section: MarkdownSection,
+  raw: string,
+  options: { maxTokens: number; tokenCounter: TokenCounter },
+): ChunkUnit[] {
+  const lines = trimBlankLines(raw)
+    .split("\n")
+    .filter((line) => line.trim());
+  const units: ChunkUnit[] = [];
+
+  for (const [lineIndex, line] of lines.entries()) {
+    const listLine = lineIndex === 0 || isNestedListItem(line);
+    if (countCandidate(document, section, line, options.tokenCounter) <= options.maxTokens) {
+      units.push({
+        kind: listLine ? "list_item" : "paragraph",
+        raw: line,
+        overlapEligible: false,
+      });
+      continue;
+    }
+
+    const parts = splitParagraph(document, section, line, options);
+    for (const [partIndex, part] of parts.entries()) {
+      units.push({
+        ...part,
+        kind: listLine && partIndex === 0 ? "list_item" : "paragraph",
+        overlapEligible: false,
+      });
+    }
+  }
+
+  return units.length > 0
+    ? units
+    : [{ kind: "list_item", raw, forceOwn: true, oversizedReason: "list_item" }];
 }
 
 function splitTable(

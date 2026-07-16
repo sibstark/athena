@@ -29,3 +29,31 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  embeddings:
+    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07}
+    platform: ${TEI_PLATFORM:-linux/amd64}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${TEI_PORT:-8080}:80"
+    environment:
+      MODEL_ID: ${TEI_MODEL_ID:-Xenova/multilingual-e5-small}
+      REVISION: ${TEI_MODEL_REVISION:-761b726dd34fb83930e26aab4e9ac3899aa1fa78}
+      POOLING: ${TEI_POOLING:-mean}
+      AUTO_TRUNCATE: ${TEI_AUTO_TRUNCATE:-false}
+      HUGGINGFACE_HUB_CACHE: /data
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./var/tei:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/80;
+          printf "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3;
+          read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]'
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 30s

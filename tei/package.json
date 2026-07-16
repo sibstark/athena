@@ -1,0 +1,28 @@
+{
+  "name": "@athena/tei",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:tei:integration": "RUN_TEI_INTEGRATION=1 vitest run tests/integration.test.ts",
+    "model:prepare": "bun src/prepare-model.ts",
+    "rag:search": "bun src/cli-search.ts",
+    "rag:compat": "bun src/cli-compat.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.2.0",
+    "@qdrant/js-client-rest": "1.18.0",
+    "commander": "^14.0.0",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

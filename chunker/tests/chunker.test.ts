@@ -114,16 +114,37 @@ describe("Markdown chunker", () => {
     expect(overlap.every((paragraph) => result.chunks[1]!.content.includes(paragraph))).toBe(true);
   });
 
-  it("does not split a single oversized list item", async () => {
+  it("splits an oversized list item without truncating its text", async () => {
     const item = `- ${Array.from({ length: 80 }, () => "слово").join(" ")}`;
     const result = await run([document(`## Список\n\n${item}\n- короткий пункт`)], {
       targetTokens: 25,
       maxTokens: 35,
+      overlapTokens: 0,
     });
-    const oversized = result.chunks.find((chunk) => chunk.metadata.oversized_reason === "list_item");
 
-    expect(oversized?.content).toContain(item);
-    expect(oversized?.metadata.oversized).toBe(true);
+    expect(result.chunks.length).toBeGreaterThan(1);
+    expect(result.chunks.every((chunk) => chunk.metadata.token_count <= 35)).toBe(true);
+    expect(result.chunks.every((chunk) => chunk.metadata.oversized_reason !== "list_item")).toBe(true);
+    expect(result.chunks.map((chunk) => chunk.content).join("\n").match(/слово/gu)).toHaveLength(80);
+    expect(result.chunks.some((chunk) => chunk.content.includes("- слово"))).toBe(true);
+  });
+
+  it("splits malformed multiline list content on line boundaries", async () => {
+    const lines = Array.from(
+      { length: 6 },
+      (_, index) => `Отзыв ${index + 1}. ${Array.from({ length: 12 }, () => "полезный текст").join(" ")}.`,
+    );
+    const result = await run([document(`## Отзывы\n\n- ${lines.join("\n")}`)], {
+      targetTokens: 30,
+      maxTokens: 45,
+      overlapTokens: 0,
+    });
+
+    expect(result.chunks.length).toBeGreaterThan(1);
+    expect(result.chunks.every((chunk) => chunk.metadata.token_count <= 45)).toBe(true);
+    for (const line of lines) {
+      expect(result.chunks.some((chunk) => chunk.content.includes(line))).toBe(true);
+    }
   });
 
   it("keeps a fitting Markdown table in one chunk", async () => {
