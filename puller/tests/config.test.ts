@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  parseNonNegativeInteger,
-  parsePositiveInteger,
-  requireWebhookUrl,
-} from "../src/config.js";
+import { parsePositiveInteger, requireWebhookUrl } from "../src/config.js";
 
 describe("configuration", () => {
   it("normalizes a valid webhook URL", () => {
@@ -32,11 +28,5 @@ describe("configuration", () => {
     expect(parsePositiveInteger("17")).toBe(17);
     expect(() => parsePositiveInteger("0")).toThrow("positive integer");
     expect(() => parsePositiveInteger("1.5")).toThrow("positive integer");
-  });
-
-  it("accepts zero for optional chunk overlap", () => {
-    expect(parseNonNegativeInteger("0")).toBe(0);
-    expect(parseNonNegativeInteger("80")).toBe(80);
-    expect(() => parseNonNegativeInteger("-1")).toThrow("non-negative integer");
   });
 });

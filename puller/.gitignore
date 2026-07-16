@@ -3,8 +3,5 @@ dist/
 .env
 .DS_Store
 coverage/
-exports/
-normalized/
 *.log
 .idea
-var/
