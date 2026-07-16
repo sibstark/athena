@@ -407,6 +407,29 @@ describe("Markdown normalization", () => {
     expect(document.content).toContain("# Не заголовок   ");
   });
 
+  it("replaces forbidden control characters and reports them", async () => {
+    const root = await temporaryDirectory();
+    const input = join(root, "content");
+    const output = join(root, "normalized", "normalized.jsonl");
+    await mkdir(input, { recursive: true });
+    await writeFile(join(input, "таблица--42.md"), "# Таблица\n\n| A\u001FB |", "utf8");
+
+    const result = await normalizeDirectory({ inputDir: input, outputFile: output });
+    const [normalized] = await jsonl(output);
+
+    expect(normalized?.content).toContain("A B");
+    expect(normalized?.content).not.toContain("\u001F");
+    expect(result.report.control_character_replacements).toBe(1);
+    expect(result.report.control_character_warnings).toEqual([
+      {
+        source: "таблица--42.md",
+        document_id: "page_42",
+        character: "U+001F",
+        count: 1,
+      },
+    ]);
+  });
+
   it("retains identical documents in different branches and marks duplicate_of", async () => {
     const root = await temporaryDirectory();
     const input = join(root, "content");

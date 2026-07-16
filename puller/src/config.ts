@@ -44,6 +44,14 @@ export function parsePositiveInteger(value: string): number {
   return parsed;
 }
 
+export function parseNonNegativeInteger(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`Expected a non-negative integer, received: ${value}`);
+  }
+  return parsed;
+}
+
 export function resolveOutputDir(value: string): string {
   return resolve(process.cwd(), value);
 }

@@ -2,7 +2,13 @@
 import "dotenv/config";
 import { Command } from "commander";
 import { BitrixApiError, BitrixClient } from "./bitrix/client.js";
-import { parsePositiveInteger, requireWebhookUrl, resolveOutputDir } from "./config.js";
+import { chunkNormalizedDocuments } from "./chunker.js";
+import {
+  parseNonNegativeInteger,
+  parsePositiveInteger,
+  requireWebhookUrl,
+  resolveOutputDir,
+} from "./config.js";
 import { exportCollection } from "./exporter.js";
 import { normalizeDirectory } from "./normalizer.js";
 
@@ -123,8 +129,88 @@ program
       console.log(`Files without title: ${result.report.files_without_title}`);
       console.log(`Tree errors: ${result.report.tree_errors}`);
       console.log(`Processing errors: ${result.report.processing_errors}`);
+      console.log(
+        `Control characters replaced: ${result.report.control_character_replacements}`,
+      );
       console.log(`JSONL: ${result.outputFile}`);
       console.log(`Tree: ${result.treeFile}`);
+      console.log(`Report: ${result.reportFile}`);
+    },
+  );
+
+program
+  .command("chunk")
+  .description("Split normalized Markdown documents into deterministic RAG chunks")
+  .requiredOption("-i, --input <file>", "normalized JSONL file")
+  .requiredOption("-t, --tree <file>", "document tree JSON file")
+  .requiredOption("-o, --output <file>", "target chunks JSONL file")
+  .option("-r, --report <file>", "chunking report (defaults next to JSONL)")
+  .option("--target-tokens <tokens>", "preferred embedding_text size", parsePositiveInteger, 320)
+  .option("--max-tokens <tokens>", "maximum embedding_text size", parsePositiveInteger, 450)
+  .option("--min-tokens <tokens>", "soft minimum embedding_text size", parsePositiveInteger, 80)
+  .option(
+    "--overlap-tokens <tokens>",
+    "maximum complete-sentence/paragraph overlap",
+    parseNonNegativeInteger,
+    50,
+  )
+  .option("--tokenizer <model>", "Hugging Face tokenizer or unicode-heuristic-v1")
+  .option("--tokenizer-revision <revision>", "pinned tokenizer revision")
+  .option("--offline", "use only the local tokenizer cache", false)
+  .option("--force", "replace existing chunks and report files", false)
+  .action(
+    async (options: {
+      input: string;
+      tree: string;
+      output: string;
+      report?: string;
+      targetTokens: number;
+      maxTokens: number;
+      minTokens: number;
+      overlapTokens: number;
+      tokenizer?: string;
+      tokenizerRevision?: string;
+      offline: boolean;
+      force: boolean;
+    }) => {
+      const result = await chunkNormalizedDocuments({
+        inputFile: resolveOutputDir(options.input),
+        treeFile: resolveOutputDir(options.tree),
+        outputFile: resolveOutputDir(options.output),
+        ...(options.report ? { reportFile: resolveOutputDir(options.report) } : {}),
+        targetTokens: options.targetTokens,
+        maxTokens: options.maxTokens,
+        minTokens: options.minTokens,
+        overlapTokens: options.overlapTokens,
+        ...(options.tokenizer ? { tokenizer: options.tokenizer } : {}),
+        ...(options.tokenizerRevision
+          ? { tokenizerRevision: options.tokenizerRevision }
+          : {}),
+        offline: options.offline,
+        force: options.force,
+        onProgress: (message) => console.log(message),
+      });
+
+      console.log("");
+      console.log("Chunking complete");
+      console.log(`Input documents: ${result.report.input_documents}`);
+      console.log(`Documents processed: ${result.report.processed_documents}`);
+      console.log(`Documents skipped: ${result.report.skipped_documents}`);
+      console.log(`Chunks created: ${result.report.chunks_created}`);
+      console.log(`Tokenizer: ${result.report.tokenizer}`);
+      console.log(`Average tokens: ${result.report.average_tokens}`);
+      console.log(`Token range: ${result.report.minimum_tokens}-${result.report.maximum_tokens}`);
+      console.log(`Chunks below minimum: ${result.report.chunks_below_min_tokens}`);
+      console.log(`Chunks above maximum: ${result.report.chunks_above_max_tokens}`);
+      console.log(`Chunks with tables: ${result.report.chunks_with_tables}`);
+      console.log(`Chunks with code: ${result.report.chunks_with_code}`);
+      console.log(`Chunks with images: ${result.report.chunks_with_images}`);
+      console.log(`Duplicates: ${result.report.duplicate_chunks}`);
+      console.log(
+        `Control characters replaced: ${result.report.control_character_replacements}`,
+      );
+      console.log(`Errors: ${result.report.errors}`);
+      console.log(`JSONL: ${result.outputFile}`);
       console.log(`Report: ${result.reportFile}`);
     },
   );

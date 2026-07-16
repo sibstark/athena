@@ -22,6 +22,10 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import { visit } from "unist-util-visit";
 import { parse as parseYaml } from "yaml";
+import {
+  sanitizeControlCharacters,
+  type ControlCharacterReplacement,
+} from "./text.js";
 import { toPosixPath } from "./utils.js";
 
 export type DocumentType = "markdown" | "external_link" | "short_note" | "empty";
@@ -86,6 +90,13 @@ export interface NormalizationError {
   message: string;
 }
 
+export interface NormalizationControlCharacterWarning {
+  source: string;
+  document_id: string;
+  character: string;
+  count: number;
+}
+
 export interface NormalizationReport {
   found_files: number;
   tree_nodes: number;
@@ -105,6 +116,8 @@ export interface NormalizationReport {
   tree_errors: number;
   processing_errors: number;
   errors: number;
+  control_character_replacements: number;
+  control_character_warnings: NormalizationControlCharacterWarning[];
   tree_error_files: NormalizationError[];
   error_files: NormalizationError[];
 }
@@ -165,6 +178,7 @@ interface ParsedMarkdownDocument {
   documentType: DocumentType;
   indexable: boolean;
   analysis: MarkdownAnalysis;
+  controlReplacements: ControlCharacterReplacement[];
 }
 
 interface DiscoveredFile {
@@ -252,6 +266,15 @@ export async function normalizeDirectory(
       if (parsed.title === null) report.files_without_title += 1;
       report.images += parsed.analysis.assets.length;
       report.external_links += parsed.analysis.externalUrls.length;
+      for (const replacement of parsed.controlReplacements) {
+        report.control_character_replacements += replacement.count;
+        report.control_character_warnings.push({
+          source: file.source,
+          document_id: file.nodeId,
+          character: replacement.character,
+          count: replacement.count,
+        });
+      }
 
       if (parsed.documentType === "empty") {
         report.empty_files += 1;
@@ -469,7 +492,8 @@ async function readAndNormalizeMarkdown(
   }
 
   const { attributes, markdown } = parseFrontMatter(decoded.replace(/^\uFEFF/, ""));
-  const content = normalizeMarkdown(markdown);
+  const sanitized = sanitizeControlCharacters(markdown);
+  const content = normalizeMarkdown(sanitized.value);
   const analysis = analyzeMarkdown(content);
   const usefulCharacterCount = [...analysis.semanticText].length;
   let documentType: DocumentType;
@@ -496,6 +520,7 @@ async function readAndNormalizeMarkdown(
     documentType,
     indexable: documentType !== "external_link" && documentType !== "empty",
     analysis,
+    controlReplacements: sanitized.replacements,
   };
 }
 
@@ -870,6 +895,8 @@ function createReport(
     tree_errors: 0,
     processing_errors: 0,
     errors: 0,
+    control_character_replacements: 0,
+    control_character_warnings: [],
     tree_error_files: [...treeErrors],
     error_files: [],
   };
