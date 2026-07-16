@@ -1,0 +1,31 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_VERSION:-v1.18.2}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - >-
+        if [[ -z "$$QDRANT__SERVICE__API_KEY" ]]; then
+          unset QDRANT__SERVICE__API_KEY;
+        fi;
+        exec ./entrypoint.sh
+    volumes:
+      - ./var/qdrant/storage:/qdrant/storage
+      - ./var/qdrant/snapshots:/qdrant/snapshots
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/6333;
+          printf "GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3;
+          read -r status <&3;
+          [[ "$$status" == *" 200 "* ]]'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
