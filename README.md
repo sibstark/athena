@@ -1,6 +1,6 @@
 # Athena
 
-Репозиторий состоит из пяти независимых проектов и общей инфраструктуры данных:
+Репозиторий состоит из независимых проектов и общей инфраструктуры данных:
 
 ```text
 puller/      Bitrix24 → Markdown
@@ -8,6 +8,8 @@ normalizer/  Markdown → normalized.jsonl + document_tree.json
 chunker/     normalized.jsonl → chunks.jsonl
 indexer/     chunks.jsonl → local E5 embeddings → Qdrant
 tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
+rag-api/     Go HTTP API → TEI + read-only Qdrant + DeepSeek
+web/         React chat UI → same-origin nginx proxy → rag-api
 data/        общие входные и выходные данные (не в Git)
 var/models/  общий кеш моделей (не в Git)
 var/qdrant/  данные Qdrant (не в Git)
@@ -44,6 +46,32 @@ bun run tei:down
 ```
 
 Подробности, smoke search и compatibility test: [tei/README.md](tei/README.md).
+
+## Go RAG API
+
+`rag-api/` — отдельный production HTTP-сервис. Он использует прошедший compatibility test TEI для query embeddings, читает существующую коллекцию Qdrant и вызывает DeepSeek только для `/v1/answer` при наличии релевантного контекста.
+
+```bash
+bun run rag-api:test
+bun run rag-api:up
+bun run rag-api:status
+bun run rag-api:logs
+```
+
+Настройка, endpoint-ы и проверенные curl-примеры: [rag-api/README.md](rag-api/README.md).
+
+## Web-интерфейс
+
+`web/` — отдельный Bun/Vite-проект на React, Tailwind CSS v4 и shadcn/ui. Он показывает интерактивные цитаты, tooltip пути, подробную панель источника и компактные сноски. Браузер вызывает только same-origin `/v1/answer`; секретный `RAG_API_KEY` добавляет nginx/Vite proxy на серверной стороне.
+
+```bash
+bun run web:test
+bun run web:build
+bun run web:up
+bun run web:status
+```
+
+После запуска Compose интерфейс доступен на `http://127.0.0.1:${WEB_PORT:-3000}`. Для production требуется внешний аутентифицирующий reverse proxy с TLS; встроенный web nginx отвечает только за статику и связь с `rag-api`. Подробности: [web/README.md](web/README.md).
 
 ## Полный ручной workflow
 

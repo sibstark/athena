@@ -14,6 +14,22 @@
     "tei:logs": "docker compose logs -f embeddings",
     "tei:status": "docker compose ps embeddings",
     "rag:search:tei": "bun tei/src/cli-search.ts",
-    "rag:compat:tei": "bun tei/src/cli-compat.ts"
+    "rag:compat:tei": "bun tei/src/cli-compat.ts",
+    "rag-api:run": "cd rag-api && GOTOOLCHAIN=go1.25.5 go run ./cmd/server",
+    "rag-api:test": "cd rag-api && GOTOOLCHAIN=go1.25.5 go test ./...",
+    "rag-api:test:integration": "cd rag-api && RUN_RAG_API_INTEGRATION=1 GOTOOLCHAIN=go1.25.5 go test ./...",
+    "rag-api:test:deepseek": "cd rag-api && RUN_DEEPSEEK_INTEGRATION=1 GOTOOLCHAIN=go1.25.5 go test ./...",
+    "rag-api:build": "cd rag-api && GOTOOLCHAIN=go1.25.5 go build ./cmd/server",
+    "rag-api:up": "docker compose up -d --build rag-api",
+    "rag-api:down": "docker compose stop rag-api",
+    "rag-api:logs": "docker compose logs -f rag-api",
+    "rag-api:status": "docker compose ps rag-api",
+    "web:dev": "cd web && bun run dev",
+    "web:test": "cd web && bun run test",
+    "web:build": "cd web && bun run build",
+    "web:up": "docker compose up -d --build web",
+    "web:down": "docker compose stop web",
+    "web:logs": "docker compose logs -f web",
+    "web:status": "docker compose ps web"
   }
 }
