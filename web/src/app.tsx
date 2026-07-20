@@ -4,10 +4,13 @@ import { BookOpen, Trash2 } from "lucide-react"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import { Composer } from "@/components/chat/composer"
 import { LoadingMessage } from "@/components/chat/loading-message"
+import { PrototypeInfo } from "@/components/prototype-info"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { useMediaQuery } from "@/hooks/use-media-query"
 import { requestAnswer, RAGAPIError } from "@/lib/api"
 import type { ChatMessage } from "@/types/api"
 
@@ -18,54 +21,64 @@ export function App() {
   const [error, setError] = React.useState<string | null>(null)
   const abortRef = React.useRef<AbortController | null>(null)
   const bottomRef = React.useRef<HTMLDivElement | null>(null)
+  const composerRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
 
   React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [messages, pending, error])
+    bottomRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "end",
+    })
+  }, [messages, pending, error, prefersReducedMotion])
 
   React.useEffect(() => () => abortRef.current?.abort(), [])
 
-  const submit = React.useCallback(async (text = query) => {
-    const trimmed = text.trim()
-    if (!trimmed || pending) return
+  const submit = React.useCallback(
+    async (text = query) => {
+      const trimmed = text.trim()
+      if (!trimmed || pending) return
 
-    const controller = new AbortController()
-    abortRef.current = controller
-    setPending(true)
-    setError(null)
-    setQuery("")
-    setMessages((current) => [
-      ...current,
-      { id: makeID(), role: "user", content: trimmed },
-    ])
-
-    try {
-      const response = await requestAnswer(trimmed, { signal: controller.signal })
+      const controller = new AbortController()
+      abortRef.current = controller
+      setPending(true)
+      setError(null)
+      setQuery("")
       setMessages((current) => [
         ...current,
-        {
-          id: response.request_id || makeID(),
-          role: "assistant",
-          query: trimmed,
-          answer: response.answer,
-          status: response.status,
-          sources: response.sources,
-          generation: response.generation,
-        },
+        { id: makeID(), role: "user", content: trimmed },
       ])
-    } catch (reason) {
-      if (controller.signal.aborted) return
-      setError(
-        reason instanceof RAGAPIError
-          ? reason.message
-          : "Не удалось связаться с сервисом. Попробуйте ещё раз.",
-      )
-      setQuery(trimmed)
-    } finally {
-      if (abortRef.current === controller) abortRef.current = null
-      setPending(false)
-    }
-  }, [pending, query])
+
+      try {
+        const response = await requestAnswer(trimmed, {
+          signal: controller.signal,
+        })
+        setMessages((current) => [
+          ...current,
+          {
+            id: response.request_id || makeID(),
+            role: "assistant",
+            query: trimmed,
+            answer: response.answer,
+            status: response.status,
+            sources: response.sources,
+            generation: response.generation,
+          },
+        ])
+      } catch (reason) {
+        if (controller.signal.aborted) return
+        setError(
+          reason instanceof RAGAPIError
+            ? reason.message
+            : "Не удалось связаться с сервисом. Попробуйте ещё раз.",
+        )
+        setQuery(trimmed)
+      } finally {
+        if (abortRef.current === controller) abortRef.current = null
+        setPending(false)
+      }
+    },
+    [pending, query],
+  )
 
   const clear = () => {
     abortRef.current?.abort()
@@ -74,18 +87,34 @@ export function App() {
     setPending(false)
   }
 
+  const selectSuggestedQuestion = React.useCallback((question: string) => {
+    setQuery(question)
+    composerRef.current?.focus()
+  }, [])
+
   return (
     <TooltipProvider delayDuration={350} disableHoverableContent={false}>
-      <main className="flex h-svh min-h-svh flex-col bg-background text-foreground">
+      <div className="flex h-svh min-h-svh min-w-0 flex-col overflow-x-hidden bg-background text-foreground">
         <header className="shrink-0 border-b bg-background/90 px-4 py-3 backdrop-blur">
-          <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
+          <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center justify-between gap-3 lg:px-2">
+            <div className="flex min-w-0 items-center gap-3">
               <span className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground">
                 <BookOpen className="size-5" />
               </span>
-              <div>
-                <h1 className="font-semibold">Athena</h1>
-                <p className="text-xs text-muted-foreground">Помощник по методическим материалам</p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="font-semibold">Athena</h1>
+                  <Badge
+                    variant="outline"
+                    aria-label="Статус проекта: прототип"
+                    className="border-warning-border/50 bg-warning/15 text-warning-foreground"
+                  >
+                    Прототип
+                  </Badge>
+                </div>
+                <p className="truncate text-xs text-muted-foreground">
+                  Помощник по методическим материалам
+                </p>
               </div>
             </div>
             {messages.length > 0 && (
@@ -97,56 +126,77 @@ export function App() {
         </header>
 
         <ScrollArea className="min-h-0 flex-1">
-          <div className="mx-auto w-full max-w-4xl px-4 py-4">
-            {messages.length === 0 && !pending ? (
-              <section className="grid min-h-[55svh] place-items-center text-center">
-                <div className="max-w-xl space-y-3">
-                  <h2 className="text-2xl font-semibold tracking-tight">Что найти в базе знаний?</h2>
-                  <p className="text-sm leading-6 text-muted-foreground">
-                    Задайте вопрос о проведении урока, упражнении или методике. В ответе можно
-                    открыть цитаты и проверить путь к исходному материалу.
-                  </p>
+          <div className="mx-auto grid w-full max-w-7xl min-w-0 items-start gap-6 px-4 py-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:px-6 lg:py-6">
+            <PrototypeInfo
+              className="lg:sticky lg:top-6 lg:self-start"
+              onSelectQuestion={selectSuggestedQuestion}
+            />
+
+            <main
+              className="min-w-0 w-full max-w-4xl justify-self-center"
+              aria-label="Чат Athena"
+            >
+              {messages.length === 0 && !pending ? (
+                <section className="grid min-h-[40svh] place-items-center py-8 text-center lg:min-h-[55svh]">
+                  <div className="max-w-xl space-y-3">
+                    <h2 className="text-2xl font-semibold tracking-tight">
+                      Что найти в материалах по ментальной арифметике?
+                    </h2>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      Задайте вопрос о проведении урока, упражнениях или
+                      методике. Athena найдёт подходящие фрагменты в загруженных
+                      материалах и покажет использованные источники.
+                    </p>
+                    <p className="text-sm font-medium text-foreground">
+                      Это прототип. Проверяйте ответы по источникам.
+                    </p>
+                  </div>
+                </section>
+              ) : (
+                <div className="divide-y divide-border/70">
+                  {messages.map((message) =>
+                    message.role === "user" ? (
+                      <article
+                        key={message.id}
+                        className="py-5"
+                        aria-label="Вопрос пользователя"
+                      >
+                        <div className="ml-auto max-w-2xl rounded-2xl bg-muted px-4 py-3 text-sm leading-6 wrap-break-word">
+                          {message.content}
+                        </div>
+                      </article>
+                    ) : (
+                      <AssistantMessage
+                        key={message.id}
+                        message={message}
+                        onRetry={submit}
+                        pending={pending}
+                      />
+                    ),
+                  )}
+                  {pending && <LoadingMessage />}
                 </div>
-              </section>
-            ) : (
-              <div className="divide-y divide-border/70">
-                {messages.map((message) =>
-                  message.role === "user" ? (
-                    <article key={message.id} className="py-5" aria-label="Вопрос пользователя">
-                      <div className="ml-auto max-w-2xl rounded-2xl bg-muted px-4 py-3 text-sm leading-6 wrap-break-word">
-                        {message.content}
-                      </div>
-                    </article>
-                  ) : (
-                    <AssistantMessage
-                      key={message.id}
-                      message={message}
-                      onRetry={submit}
-                      pending={pending}
-                    />
-                  ),
-                )}
-                {pending && <LoadingMessage />}
-              </div>
-            )}
-            {error && (
-              <Alert variant="destructive" className="my-4">
-                <AlertTitle>Ошибка</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-            <div ref={bottomRef} />
+              )}
+              {error && (
+                <Alert variant="destructive" className="my-4">
+                  <AlertTitle>Ошибка</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              <div ref={bottomRef} />
+            </main>
           </div>
         </ScrollArea>
 
         <Composer
+          inputRef={composerRef}
           value={query}
           pending={pending}
           onChange={setQuery}
           onSubmit={() => submit()}
           onStop={() => abortRef.current?.abort()}
         />
-      </main>
+      </div>
     </TooltipProvider>
   )
 }
