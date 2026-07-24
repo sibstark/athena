@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Config struct {
@@ -19,6 +21,11 @@ type Config struct {
 	ShutdownTimeout   time.Duration
 	CORSOrigins       []string
 	APIKey            string
+	AuthUsername      string
+	AuthPasswordHash  string
+	AuthSessionSecret string
+	AuthSessionTTL    time.Duration
+	AuthCookieSecure  bool
 
 	TEIURL     string
 	TEITimeout time.Duration
@@ -59,6 +66,11 @@ func Load() (Config, error) {
 		ShutdownTimeout:         envDuration("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
 		CORSOrigins:             splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
 		APIKey:                  strings.TrimSpace(os.Getenv("RAG_API_KEY")),
+		AuthUsername:            strings.TrimSpace(os.Getenv("AUTH_USERNAME")),
+		AuthPasswordHash:        strings.TrimSpace(os.Getenv("AUTH_PASSWORD_HASH")),
+		AuthSessionSecret:       strings.TrimSpace(os.Getenv("AUTH_SESSION_SECRET")),
+		AuthSessionTTL:          envDuration("AUTH_SESSION_TTL", 24*time.Hour),
+		AuthCookieSecure:        envBool("AUTH_COOKIE_SECURE", false),
 		TEIURL:                  env("TEI_URL", "http://127.0.0.1:8080"),
 		TEITimeout:              envDuration("TEI_TIMEOUT", 10*time.Second),
 		QdrantURL:               env("QDRANT_URL", "http://127.0.0.1:6333"),
@@ -94,8 +106,23 @@ func (c Config) Validate() error {
 	if c.DeepSeekAPIKey == "" {
 		missing = append(missing, "DEEPSEEK_API_KEY")
 	}
+	if c.AuthUsername == "" {
+		missing = append(missing, "AUTH_USERNAME")
+	}
+	if c.AuthPasswordHash == "" {
+		missing = append(missing, "AUTH_PASSWORD_HASH")
+	}
+	if c.AuthSessionSecret == "" {
+		missing = append(missing, "AUTH_SESSION_SECRET")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
+	if _, err := bcrypt.Cost([]byte(c.AuthPasswordHash)); err != nil {
+		return fmt.Errorf("AUTH_PASSWORD_HASH must be a valid bcrypt hash")
+	}
+	if len([]byte(c.AuthSessionSecret)) < 32 {
+		return fmt.Errorf("AUTH_SESSION_SECRET must be at least 32 bytes")
 	}
 	for name, raw := range map[string]string{"TEI_URL": c.TEIURL, "QDRANT_URL": c.QdrantURL, "DEEPSEEK_BASE_URL": c.DeepSeekBaseURL} {
 		u, err := url.Parse(raw)
@@ -117,6 +144,9 @@ func (c Config) Validate() error {
 	}
 	if c.DeepSeekMaxConcurrency < 1 || c.DeepSeekMaxOutputTokens < 1 {
 		return fmt.Errorf("DeepSeek limits must be positive")
+	}
+	if c.AuthSessionTTL <= 0 {
+		return fmt.Errorf("AUTH_SESSION_TTL must be positive")
 	}
 	for name, duration := range map[string]time.Duration{"TEI_TIMEOUT": c.TEITimeout, "QDRANT_TIMEOUT": c.QdrantTimeout, "DEEPSEEK_TIMEOUT": c.DeepSeekTimeout, "HTTP_READ_TIMEOUT": c.ReadTimeout, "HTTP_WRITE_TIMEOUT": c.WriteTimeout} {
 		if duration <= 0 {
@@ -144,7 +174,12 @@ func validateEnvironmentSyntax() error {
 			return fmt.Errorf("DEEPSEEK_THINKING_ENABLED must be true or false")
 		}
 	}
-	for _, name := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "TEI_TIMEOUT", "QDRANT_TIMEOUT", "DEEPSEEK_TIMEOUT"} {
+	if value := strings.TrimSpace(os.Getenv("AUTH_COOKIE_SECURE")); value != "" {
+		if _, err := strconv.ParseBool(value); err != nil {
+			return fmt.Errorf("AUTH_COOKIE_SECURE must be true or false")
+		}
+	}
+	for _, name := range []string{"HTTP_READ_HEADER_TIMEOUT", "HTTP_READ_TIMEOUT", "HTTP_WRITE_TIMEOUT", "HTTP_IDLE_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "TEI_TIMEOUT", "QDRANT_TIMEOUT", "DEEPSEEK_TIMEOUT", "AUTH_SESSION_TTL"} {
 		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 			if _, err := time.ParseDuration(value); err != nil {
 				return fmt.Errorf("%s must be a Go duration", name)

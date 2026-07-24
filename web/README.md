@@ -1,6 +1,6 @@
 # Athena Web
 
-React/Vite-клиент для `rag-api`. Интерфейс отправляет только same-origin запросы на `/v1/answer`; ключ `RAG_API_KEY` в браузерную сборку не попадает. В Docker заголовок авторизации добавляет nginx, а при локальной разработке — Vite dev proxy.
+React/Vite-клиент для `rag-api`. Интерфейс отправляет same-origin запросы с `credentials: "include"` и использует только `HttpOnly` session cookie. `RAG_API_KEY` предназначен для внутренних клиентов и браузерному proxy не передаётся.
 
 ## Технологии
 
@@ -17,7 +17,9 @@ Tailwind подключён через `@import "tailwindcss"`; `tailwind.config
 
 ```env
 RAG_API_DEV_TARGET=http://127.0.0.1:8090
-RAG_API_KEY=your-local-rag-api-key
+AUTH_USERNAME=admin
+AUTH_PASSWORD_HASH='<bcrypt-хеш>'
+AUTH_SESSION_SECRET=<случайный секрет минимум 32 байта>
 ```
 
 Затем:
@@ -28,7 +30,7 @@ bun install
 bun run dev
 ```
 
-Откройте `http://127.0.0.1:5173`. Значение `RAG_API_KEY` читает только сервер Vite и добавляет в проксируемый запрос; не используйте префикс `VITE_` для секретов.
+Откройте `http://127.0.0.1:5173`. Vite проксирует `/v1/*` без добавления Bearer token; cookie устанавливается для same-origin приложения. Не помещайте пароль, bcrypt-хеш, session secret или API key в переменные с префиксом `VITE_`.
 
 ## Проверки
 
@@ -48,9 +50,9 @@ bun run web:status
 bun run web:logs
 ```
 
-Приложение доступно на `http://127.0.0.1:${WEB_PORT:-3000}`. nginx проксирует `/v1/*` в `rag-api` и добавляет серверный `Authorization`.
+Приложение доступно на `http://127.0.0.1:${WEB_PORT:-3000}`. nginx проксирует `/v1/*` и cookie в `rag-api`, одновременно удаляя браузерный заголовок `Authorization`.
 
-Важно: встроенный nginx не аутентифицирует конечного пользователя. При публикации сервиса внешний reverse proxy/identity-aware proxy обязан закрыть весь web origin аутентификацией и TLS. Не публикуйте напрямую порты TEI, Qdrant или `rag-api`.
+При публикации используйте HTTPS и `AUTH_COOKIE_SECURE=true`. Корневой Compose содержит opt-in профиль `https` на базе `umputun/nginx-le:v1.4.3`; настройка домена и команды запуска описаны в корневом README. Не публикуйте напрямую порты TEI, Qdrant или `rag-api`.
 
 ## Источники
 

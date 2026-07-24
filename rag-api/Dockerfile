@@ -2,7 +2,8 @@ ARG GO_IMAGE=golang:1.25.5-alpine3.22@sha256:3587db7cc96576822c606d119729370dbf5
 FROM ${GO_IMAGE} AS build
 
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/rag-api ./cmd/server

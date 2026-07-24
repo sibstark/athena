@@ -27,7 +27,26 @@ POST /v1/answer → тот же retrieval → ограниченный конт�
 ```env
 RAG_API_KEY=<длинный случайный Bearer token>
 DEEPSEEK_API_KEY=<ключ DeepSeek>
+AUTH_USERNAME=admin
+AUTH_PASSWORD_HASH='<bcrypt-хеш>'
+AUTH_SESSION_SECRET=<случайный секрет минимум 32 байта>
+AUTH_SESSION_TTL=24h
+AUTH_COOKIE_SECURE=false
 ```
+
+Обычный пароль не сохраняется. Создайте bcrypt-хеш интерактивной командой: пароль дважды читается из терминала без echo и никогда не передаётся в argv.
+
+```bash
+bun run rag-api:hash-password
+```
+
+Создайте независимый session secret минимум из 32 случайных байт:
+
+```bash
+openssl rand -base64 32
+```
+
+Запишите результаты только в локальный `.env`. Bcrypt-хеш заключите в одинарные кавычки, чтобы символы `$` обрабатывались буквально. Не коммитьте пароль, хеш или session secret.
 
 Основные настройки:
 
@@ -35,6 +54,8 @@ DEEPSEEK_API_KEY=<ключ DeepSeek>
 |---|---|
 | `HTTP_ADDR` | code default `:8080`; root `.env.example` uses `:8090` for host run |
 | `RAG_API_PORT` | `8090` (host Docker) |
+| `AUTH_SESSION_TTL` | `24h` |
+| `AUTH_COOKIE_SECURE` | `false` локально; `true` только с HTTPS |
 | `TEI_URL` | `http://127.0.0.1:8080` на host |
 | `QDRANT_URL` | `http://127.0.0.1:6333` на host |
 | `QDRANT_COLLECTION` | `methodology_e5_small_v1` |
@@ -55,7 +76,7 @@ DEEPSEEK_API_KEY=<ключ DeepSeek>
 
 ```bash
 cp .env.example .env
-# заполнить RAG_API_KEY и DEEPSEEK_API_KEY
+# заполнить RAG_API_KEY, DEEPSEEK_API_KEY и AUTH_*
 
 bun run db:up
 bun run tei:up
@@ -77,6 +98,29 @@ curl http://127.0.0.1:8090/health/live
 curl http://127.0.0.1:8090/health/ready
 curl http://127.0.0.1:8090/metrics
 ```
+
+## Авторизация пользователя
+
+Браузер использует только подписанную `HttpOnly` cookie `athena_session`. Сессия не сохраняется в БД: cookie содержит имя пользователя и срок действия, кодируется base64url и подписывается HMAC-SHA256. Cookie имеет `SameSite=Strict`, `Path=/`, ограниченный TTL и флаг `Secure`, когда `AUTH_COOKIE_SECURE=true`.
+
+```text
+POST /v1/auth/login
+GET  /v1/auth/session
+POST /v1/auth/logout
+```
+
+Пример ручной проверки с cookie jar:
+
+```bash
+curl -sS -c /tmp/athena-cookies.txt http://127.0.0.1:8090/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"your-password"}'
+
+curl -sS -b /tmp/athena-cookies.txt http://127.0.0.1:8090/v1/auth/session
+curl -sS -b /tmp/athena-cookies.txt -X POST http://127.0.0.1:8090/v1/auth/logout
+```
+
+После пяти неудачных входов с одного IP новые попытки блокируются на 15 минут; успешный вход очищает счётчик. Неверный логин и неверный пароль всегда возвращают одинаковую ошибку.
 
 ## Поиск
 
@@ -133,9 +177,13 @@ bun run rag:compat:tei -- \
 
 ## Безопасность
 
-- `/v1/*` защищены обязательным `RAG_API_KEY`.
+- `/v1/search` и `/v1/answer` принимают либо пользовательскую session cookie, либо `RAG_API_KEY` для внутренних CLI и машинных клиентов.
+- Auth endpoints, healthcheck и metrics не требуют Bearer token.
+- Пароли хранятся только как bcrypt-хеши; session cookie подписывается HMAC-SHA256 и проверяется constant-time сравнением.
 - Секреты, вопросы, контекст, ответы и vectors не пишутся в штатные логи.
 - Compose публикует API, Qdrant и TEI только на `127.0.0.1`.
 - Qdrant-клиент сервиса не имеет методов записи.
 - Docker runtime — `scratch`, binary запускается как UID/GID `65532`, builder image закреплён digest.
 - Streaming, история диалога и tool calling в первой версии отсутствуют.
+
+На сервере обязательно используйте HTTPS и `AUTH_COOKIE_SECURE=true`. Не публикуйте наружу порты TEI, Qdrant или внутренний порт `rag-api`; Compose по умолчанию привязывает host-порты только к `127.0.0.1`.

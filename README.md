@@ -62,7 +62,7 @@ bun run rag-api:logs
 
 ## Web-интерфейс
 
-`web/` — отдельный Bun/Vite-проект на React, Tailwind CSS v4 и shadcn/ui. Он показывает интерактивные цитаты, tooltip пути, подробную панель источника и компактные сноски. Браузер вызывает только same-origin `/v1/answer`; секретный `RAG_API_KEY` добавляет nginx/Vite proxy на серверной стороне.
+`web/` — отдельный Bun/Vite-проект на React, Tailwind CSS v4 и shadcn/ui. Он показывает интерактивные цитаты, tooltip пути, подробную панель источника и компактные сноски. Браузер авторизуется через подписанную `HttpOnly` cookie; `RAG_API_KEY` используется только внутренними CLI и машинными клиентами.
 
 ```bash
 bun run web:test
@@ -72,6 +72,31 @@ bun run web:status
 ```
 
 После запуска Compose интерфейс доступен на `http://127.0.0.1:${WEB_PORT:-3000}`. Для production требуется внешний аутентифицирующий reverse proxy с TLS; встроенный web nginx отвечает только за статику и связь с `rag-api`. Подробности: [web/README.md](web/README.md).
+
+## Production HTTPS
+
+Для публичного сервера предусмотрен opt-in профиль с `umputun/nginx-le:v1.4.3`. Он публикует только порты `80` и `443`, автоматически получает и обновляет сертификат Let's Encrypt и проксирует запросы во внутренний `web:8080`. Сертификаты сохраняются в `var/nginx-le/ssl/`.
+
+До запуска направьте DNS-запись домена на сервер, откройте входящие TCP-порты `80` и `443` и задайте в серверном `.env`:
+
+```env
+LETSENCRYPT=true
+LE_FQDN=devgames.hwschool.online
+LE_EMAIL=admin@example.com
+TZ=UTC
+AUTH_COOKIE_SECURE=true
+```
+
+Запуск и проверка:
+
+```bash
+bun run https:up
+bun run https:status
+bun run https:logs
+curl -I https://devgames.hwschool.online/healthz
+```
+
+HTTP автоматически перенаправляется на HTTPS. Порты Qdrant, TEI и `rag-api` остаются привязаны только к `127.0.0.1`; не открывайте их в firewall. Для остановки только TLS-прокси используйте `bun run https:down`. Не удаляйте `var/nginx-le/ssl/`, если хотите сохранить выданные сертификаты.
 
 ## Полный ручной workflow
 

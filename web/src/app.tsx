@@ -1,6 +1,8 @@
 import * as React from "react"
-import { BookOpen, Trash2 } from "lucide-react"
+import { BookOpen, LogOut, Trash2 } from "lucide-react"
 
+import { LoginPage } from "@/components/auth/login-page"
+import { SessionLoading } from "@/components/auth/session-loading"
 import { AssistantMessage } from "@/components/chat/assistant-message"
 import { Composer } from "@/components/chat/composer"
 import { LoadingMessage } from "@/components/chat/loading-message"
@@ -11,14 +13,21 @@ import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useMediaQuery } from "@/hooks/use-media-query"
+import { requestLogout, requestSession } from "@/lib/auth"
 import { requestAnswer, RAGAPIError } from "@/lib/api"
 import type { ChatMessage } from "@/types/api"
 
 export function App() {
+  const [session, setSession] = React.useState<
+    | { status: "checking" }
+    | { status: "authenticated"; username: string }
+    | { status: "unauthenticated"; error?: string }
+  >({ status: "checking" })
   const [messages, setMessages] = React.useState<ChatMessage[]>([])
   const [query, setQuery] = React.useState("")
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [logoutPending, setLogoutPending] = React.useState(false)
   const abortRef = React.useRef<AbortController | null>(null)
   const bottomRef = React.useRef<HTMLDivElement | null>(null)
   const composerRef = React.useRef<HTMLTextAreaElement | null>(null)
@@ -32,6 +41,44 @@ export function App() {
   }, [messages, pending, error, prefersReducedMotion])
 
   React.useEffect(() => () => abortRef.current?.abort(), [])
+
+  React.useEffect(() => {
+    let active = true
+    requestSession()
+      .then((result) => {
+        if (!active) return
+        setSession(
+          result.authenticated
+            ? { status: "authenticated", username: result.username }
+            : { status: "unauthenticated" },
+        )
+      })
+      .catch(() => {
+        if (active) {
+          setSession({
+            status: "unauthenticated",
+            error: "Не удалось проверить сессию. Войдите повторно.",
+          })
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const resetChat = React.useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setMessages([])
+    setQuery("")
+    setError(null)
+    setPending(false)
+  }, [])
+
+  const endSession = React.useCallback(() => {
+    resetChat()
+    setSession({ status: "unauthenticated" })
+  }, [resetChat])
 
   const submit = React.useCallback(
     async (text = query) => {
@@ -66,6 +113,10 @@ export function App() {
         ])
       } catch (reason) {
         if (controller.signal.aborted) return
+        if (reason instanceof RAGAPIError && reason.status === 401) {
+          endSession()
+          return
+        }
         setError(
           reason instanceof RAGAPIError
             ? reason.message
@@ -77,20 +128,41 @@ export function App() {
         setPending(false)
       }
     },
-    [pending, query],
+    [endSession, pending, query],
   )
 
-  const clear = () => {
-    abortRef.current?.abort()
-    setMessages([])
-    setError(null)
-    setPending(false)
+  const logout = async () => {
+    if (logoutPending) return
+    setLogoutPending(true)
+    try {
+      await requestLogout()
+    } catch {
+      // Locally end the session even if the server is temporarily unavailable.
+    } finally {
+      setLogoutPending(false)
+      endSession()
+    }
   }
 
   const selectSuggestedQuestion = React.useCallback((question: string) => {
     setQuery(question)
     composerRef.current?.focus()
   }, [])
+
+  if (session.status === "checking") {
+    return <SessionLoading />
+  }
+
+  if (session.status === "unauthenticated") {
+    return (
+      <LoginPage
+        initialError={session.error}
+        onAuthenticated={(username) =>
+          setSession({ status: "authenticated", username })
+        }
+      />
+    )
+  }
 
   return (
     <TooltipProvider delayDuration={350} disableHoverableContent={false}>
@@ -117,11 +189,22 @@ export function App() {
                 </p>
               </div>
             </div>
-            {messages.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={clear}>
-                <Trash2 /> Очистить
+            <div className="flex shrink-0 items-center gap-1">
+              {messages.length > 0 && (
+                <Button variant="ghost" size="sm" onClick={resetChat}>
+                  <Trash2 /> Очистить
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={logout}
+                disabled={logoutPending}
+                aria-label={`Выйти из Athena (${session.username})`}
+              >
+                <LogOut /> Выйти
               </Button>
-            )}
+            </div>
           </div>
         </header>
 

@@ -23,13 +23,6 @@ export default defineConfig(({ mode }) => {
         "/v1": {
           target: env.RAG_API_DEV_TARGET || "http://127.0.0.1:8090",
           changeOrigin: true,
-          configure(proxy) {
-            proxy.on("proxyReq", (proxyRequest) => {
-              if (env.RAG_API_KEY) {
-                proxyRequest.setHeader("Authorization", `Bearer ${env.RAG_API_KEY}`)
-              }
-            })
-          },
         },
       },
     },

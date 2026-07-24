@@ -81,6 +81,11 @@ services:
       DEEPSEEK_THINKING_ENABLED: ${DEEPSEEK_THINKING_ENABLED:-false}
       DEEPSEEK_MAX_CONCURRENCY: ${DEEPSEEK_MAX_CONCURRENCY:-4}
       RAG_API_KEY: ${RAG_API_KEY:-}
+      AUTH_USERNAME: ${AUTH_USERNAME:-}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
+      AUTH_SESSION_TTL: ${AUTH_SESSION_TTL:-24h}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       RAG_DEFAULT_TOP_K: ${RAG_DEFAULT_TOP_K:-8}
       RAG_MAX_TOP_K: ${RAG_MAX_TOP_K:-20}
       RAG_SCORE_THRESHOLD: ${RAG_SCORE_THRESHOLD:-0.65}
@@ -111,8 +116,7 @@ services:
       - "127.0.0.1:${WEB_PORT:-3000}:8080"
     environment:
       RAG_API_UPSTREAM: http://rag-api:8080
-      RAG_API_KEY: ${RAG_API_KEY:-}
-      NGINX_ENVSUBST_FILTER: ^(RAG_API_UPSTREAM|RAG_API_KEY)$$
+      NGINX_ENVSUBST_FILTER: ^RAG_API_UPSTREAM$$
     depends_on:
       rag-api:
         condition: service_healthy
@@ -122,3 +126,34 @@ services:
       timeout: 3s
       retries: 6
       start_period: 5s
+
+  https-proxy:
+    profiles: ["https"]
+    build:
+      context: ./deploy/nginx-le
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TZ: ${TZ:-UTC}
+      LETSENCRYPT: ${LETSENCRYPT:-true}
+      LE_EMAIL: ${LE_EMAIL:-}
+      LE_FQDN: ${LE_FQDN:-devgames.hwschool.online}
+    volumes:
+      - ./var/nginx-le/ssl:/etc/nginx/ssl
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /etc/nginx/ssl/le-crt.pem && nginx -t >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

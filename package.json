@@ -16,6 +16,7 @@
     "rag:search:tei": "bun tei/src/cli-search.ts",
     "rag:compat:tei": "bun tei/src/cli-compat.ts",
     "rag-api:run": "cd rag-api && GOTOOLCHAIN=go1.25.5 go run ./cmd/server",
+    "rag-api:hash-password": "cd rag-api && GOTOOLCHAIN=go1.25.5 go run ./cmd/hash-password",
     "rag-api:test": "cd rag-api && GOTOOLCHAIN=go1.25.5 go test ./...",
     "rag-api:test:integration": "cd rag-api && RUN_RAG_API_INTEGRATION=1 GOTOOLCHAIN=go1.25.5 go test ./...",
     "rag-api:test:deepseek": "cd rag-api && RUN_DEEPSEEK_INTEGRATION=1 GOTOOLCHAIN=go1.25.5 go test ./...",
@@ -30,6 +31,10 @@
     "web:up": "docker compose up -d --build web",
     "web:down": "docker compose stop web",
     "web:logs": "docker compose logs -f web",
-    "web:status": "docker compose ps web"
+    "web:status": "docker compose ps web",
+    "https:up": "docker compose --profile https up -d --build https-proxy",
+    "https:down": "docker compose --profile https stop https-proxy",
+    "https:logs": "docker compose --profile https logs -f https-proxy",
+    "https:status": "docker compose --profile https ps https-proxy"
   }
 }

@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	athenaauth "github.com/sibstark/athena/rag-api/internal/auth"
 	"github.com/sibstark/athena/rag-api/internal/config"
 	"github.com/sibstark/athena/rag-api/internal/models"
 	"github.com/sibstark/athena/rag-api/internal/observability"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type fakeRetriever struct {
@@ -73,6 +75,145 @@ func TestSearchRequiresAuthAndNeverCallsGenerator(t *testing.T) {
 	}
 	if generator.calls.Load() != 0 {
 		t.Fatal("search called generator")
+	}
+}
+
+func TestHealthMetricsAndAuthEndpointsDoNotRequireBearer(t *testing.T) {
+	handler := testServer(&fakeRetriever{}, &fakeGenerator{}).Handler()
+	for _, path := range []string{"/health/live", "/health/ready", "/metrics"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/v1/auth/session", nil)
+	sessionResponse := httptest.NewRecorder()
+	handler.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusUnauthorized || strings.Contains(sessionResponse.Body.String(), "Bearer") {
+		t.Fatalf("session status=%d body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
+func TestLoginSuccessAndCookieFlags(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	response := loginRequest(server.Handler(), "admin", "password", "192.0.2.10:1234")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"authenticated":true`) || !strings.Contains(response.Body.String(), `"username":"admin"`) {
+		t.Fatalf("body=%s", response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies=%v", cookies)
+	}
+	cookie := cookies[0]
+	if cookie.Name != sessionCookieName || cookie.Value == "" || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteStrictMode || cookie.Path != "/" || cookie.MaxAge != int((24*time.Hour)/time.Second) {
+		t.Fatalf("cookie=%+v", cookie)
+	}
+
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/v1/auth/session", nil)
+	sessionRequest.AddCookie(cookie)
+	sessionResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK || !strings.Contains(sessionResponse.Body.String(), `"username":"admin"`) {
+		t.Fatalf("session status=%d body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
+func TestInvalidUsernameAndPasswordReturnSameError(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	wrongUsername := loginRequest(server.Handler(), "other", "password", "192.0.2.11:1234")
+	wrongPassword := loginRequest(server.Handler(), "admin", "wrong", "192.0.2.12:1234")
+	if wrongUsername.Code != http.StatusUnauthorized || wrongPassword.Code != http.StatusUnauthorized {
+		t.Fatalf("statuses=%d,%d", wrongUsername.Code, wrongPassword.Code)
+	}
+	for _, response := range []*httptest.ResponseRecorder{wrongUsername, wrongPassword} {
+		var payload models.APIError
+		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Error.Code != "invalid_credentials" || payload.Error.Message != "Неверный логин или пароль" {
+			t.Fatalf("error=%+v", payload.Error)
+		}
+	}
+}
+
+func TestAnswerAcceptsSessionCookieAndRejectsTampering(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	login := loginRequest(server.Handler(), "admin", "password", "192.0.2.13:1234")
+	cookie := login.Result().Cookies()[0]
+
+	authorized := httptest.NewRequest(http.MethodPost, "/v1/answer", strings.NewReader(`{"query":"q"}`))
+	authorized.AddCookie(cookie)
+	authorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(authorizedResponse, authorized)
+	if authorizedResponse.Code != http.StatusOK {
+		t.Fatalf("authorized status=%d body=%s", authorizedResponse.Code, authorizedResponse.Body.String())
+	}
+
+	cookie.Value = "A" + cookie.Value[1:]
+	tampered := httptest.NewRequest(http.MethodPost, "/v1/answer", strings.NewReader(`{"query":"q"}`))
+	tampered.AddCookie(cookie)
+	tamperedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(tamperedResponse, tampered)
+	if tamperedResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered status=%d", tamperedResponse.Code)
+	}
+}
+
+func TestAnswerRejectsExpiredSessionCookie(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	current := time.Unix(1_700_000_000, 0)
+	server.auth = athenaauth.New(athenaauth.Config{
+		Username:      server.cfg.AuthUsername,
+		PasswordHash:  server.cfg.AuthPasswordHash,
+		SessionSecret: server.cfg.AuthSessionSecret,
+		SessionTTL:    server.cfg.AuthSessionTTL,
+	}, func() time.Time { return current })
+	token, _, err := server.auth.Login("admin", "password", "192.0.2.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(25 * time.Hour)
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/answer", strings.NewReader(`{"query":"q"}`))
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestLogoutClearsCookie(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/logout", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d", response.Code)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != sessionCookieName || cookies[0].Value != "" || cookies[0].MaxAge != -1 || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookies=%+v", cookies)
+	}
+}
+
+func TestLoginRateLimit(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	for attempt := 0; attempt < 5; attempt++ {
+		response := loginRequest(server.Handler(), "admin", "wrong", "192.0.2.14:1234")
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status=%d", attempt, response.Code)
+		}
+	}
+	limited := loginRequest(server.Handler(), "admin", "password", "192.0.2.14:1234")
+	if limited.Code != http.StatusTooManyRequests || !strings.Contains(limited.Body.String(), "too_many_login_attempts") {
+		t.Fatalf("status=%d body=%s", limited.Code, limited.Body.String())
 	}
 }
 
@@ -150,8 +291,21 @@ func TestClientCancellationReachesRetriever(t *testing.T) {
 }
 
 func testServer(retriever *fakeRetriever, generator *fakeGenerator) *Server {
-	cfg := config.Config{APIKey: "key", HTTPMaxBodyBytes: 1 << 20, DefaultTopK: 8, MaxTopK: 20, ScoreThreshold: .65, MaxQueryChars: 4000, MaxContextChars: 30000, MaxContextChunks: 8, TEITimeout: time.Second, QdrantTimeout: time.Second}
+	hash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.MinCost)
+	if err != nil {
+		panic(err)
+	}
+	cfg := config.Config{APIKey: "key", AuthUsername: "admin", AuthPasswordHash: string(hash), AuthSessionSecret: strings.Repeat("s", 32), AuthSessionTTL: 24 * time.Hour, AuthCookieSecure: true, HTTPMaxBodyBytes: 1 << 20, DefaultTopK: 8, MaxTopK: 20, ScoreThreshold: .65, MaxQueryChars: 4000, MaxContextChars: 30000, MaxContextChunks: 8, TEITimeout: time.Second, QdrantTimeout: time.Second}
 	return New(cfg, retriever, generator, readyStub{}, readyStub{}, observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func loginRequest(handler http.Handler, username, password, remoteAddr string) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(map[string]string{"username": username, "password": password})
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/login", bytes.NewReader(body))
+	request.RemoteAddr = remoteAddr
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }
 func perform(handler http.Handler, path, body, key string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))

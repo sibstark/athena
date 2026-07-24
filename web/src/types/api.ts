@@ -27,6 +27,31 @@ export type AnswerResponse = {
   generation?: GenerationInfo
 }
 
+export type SearchFilters = Partial<{
+  document_id: string
+  parent_document_id: string
+  page_id: string
+  parent_page_id: string
+  root_page_id: string
+  language: string
+  category: string
+  status: string
+}>
+
+export type SearchResult = Source & { content: string }
+
+export type SearchResponse = {
+  request_id: string
+  query: string
+  results: SearchResult[]
+  retrieval: {
+    collection: string
+    embedding_model: string
+    returned: number
+    duration_ms: number
+  }
+}
+
 export type APIErrorResponse = {
   request_id?: string
   error?: {

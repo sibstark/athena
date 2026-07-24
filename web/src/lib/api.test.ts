@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { requestAnswer } from "./api"
+import { requestAnswer, requestSearch } from "./api"
 
 describe("requestAnswer", () => {
   it("делает один same-origin запрос и нормализует sources", async () => {
@@ -19,8 +19,56 @@ describe("requestAnswer", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(fetchImpl).toHaveBeenCalledWith(
       "/v1/answer",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ query: "Вопрос" }) }),
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ query: "Вопрос" }),
+      }),
     )
-    expect(result.sources[0]).toMatchObject({ source_id: "S1", breadcrumbs: ["Путь"] })
+    expect(result.sources[0]).toMatchObject({
+      source_id: "S1",
+      breadcrumbs: ["Путь"],
+    })
+  })
+
+  it("отправляет search с cookie credentials", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          request_id: "req-search",
+          query: "Вопрос",
+          results: [
+            {
+              source_id: "S1",
+              chunk_id: "chunk-1",
+              document_id: "page-1",
+              score: 0.8,
+              content: "Фрагмент",
+              title: "Источник",
+              source: "source.md",
+              breadcrumbs: [],
+              heading_path: [],
+              section_title: "Раздел",
+            },
+          ],
+          retrieval: {
+            collection: "collection",
+            embedding_model: "model",
+            returned: 1,
+            duration_ms: 10,
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    const result = await requestSearch("Вопрос", { fetchImpl })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/v1/search",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    )
+    expect(result.results[0]).toMatchObject({
+      source_id: "S1",
+      content: "Фрагмент",
+    })
   })
 })

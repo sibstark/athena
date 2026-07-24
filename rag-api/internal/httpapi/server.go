@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	athenaauth "github.com/sibstark/athena/rag-api/internal/auth"
 	"github.com/sibstark/athena/rag-api/internal/config"
 	"github.com/sibstark/athena/rag-api/internal/contextbuilder"
 	"github.com/sibstark/athena/rag-api/internal/models"
@@ -42,6 +44,7 @@ type Server struct {
 	builder               contextbuilder.Builder
 	metrics               *observability.Metrics
 	logger                *slog.Logger
+	auth                  *athenaauth.Manager
 	handler               http.Handler
 }
 
@@ -49,15 +52,21 @@ type requestIDKey struct{}
 
 var citationPattern = regexp.MustCompile(`\[S([1-9][0-9]*)\]`)
 
+const sessionCookieName = "athena_session"
+
 func New(cfg config.Config, retriever Retriever, generator Generator, teiReady, qdrantReady Readiness, metrics *observability.Metrics, logger *slog.Logger) *Server {
-	s := &Server{cfg: cfg, retriever: retriever, generator: generator, teiReady: teiReady, qdrantReady: qdrantReady, builder: contextbuilder.Builder{MaxChars: cfg.MaxContextChars, MaxChunks: cfg.MaxContextChunks}, metrics: metrics, logger: logger}
+	authManager := athenaauth.New(athenaauth.Config{Username: cfg.AuthUsername, PasswordHash: cfg.AuthPasswordHash, SessionSecret: cfg.AuthSessionSecret, SessionTTL: cfg.AuthSessionTTL}, time.Now)
+	s := &Server{cfg: cfg, retriever: retriever, generator: generator, teiReady: teiReady, qdrantReady: qdrantReady, builder: contextbuilder.Builder{MaxChars: cfg.MaxContextChars, MaxChunks: cfg.MaxContextChunks}, metrics: metrics, logger: logger, auth: authManager}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", s.live)
 	mux.HandleFunc("GET /health/ready", s.ready)
 	mux.HandleFunc("GET /metrics", s.prometheus)
+	mux.HandleFunc("POST /v1/auth/login", s.login)
+	mux.HandleFunc("GET /v1/auth/session", s.session)
+	mux.HandleFunc("POST /v1/auth/logout", s.logout)
 	mux.HandleFunc("POST /v1/search", s.search)
 	mux.HandleFunc("POST /v1/answer", s.answer)
-	s.handler = s.recovery(s.requestID(s.logging(s.cors(s.auth(mux)))))
+	s.handler = s.recovery(s.requestID(s.logging(s.cors(s.authorize(mux)))))
 	return s
 }
 
@@ -82,6 +91,69 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 func (s *Server) prometheus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	s.metrics.WritePrometheus(w)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.HTTPMaxBodyBytes)
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var request struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := decoder.Decode(&request); err != nil {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "Некорректный JSON-запрос")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "В теле должен быть один JSON-объект")
+		return
+	}
+
+	token, expires, err := s.auth.Login(request.Username, request.Password, clientIP(r))
+	switch {
+	case errors.Is(err, athenaauth.ErrRateLimited):
+		s.writeError(w, r, http.StatusTooManyRequests, "too_many_login_attempts", "Слишком много попыток входа. Попробуйте позже")
+		return
+	case errors.Is(err, athenaauth.ErrInvalidCredentials):
+		s.writeError(w, r, http.StatusUnauthorized, "invalid_credentials", "Неверный логин или пароль")
+		return
+	case err != nil:
+		s.writeError(w, r, http.StatusInternalServerError, "internal_error", "Внутренняя ошибка")
+		return
+	}
+
+	http.SetCookie(w, s.sessionCookie(token, expires, max(1, int(s.cfg.AuthSessionTTL/time.Second))))
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": s.cfg.AuthUsername})
+}
+
+func (s *Server) session(w http.ResponseWriter, r *http.Request) {
+	username, ok := s.sessionUsername(r)
+	if !ok {
+		s.writeError(w, r, http.StatusUnauthorized, "unauthorized", "Требуется авторизация")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "username": username})
+}
+
+func (s *Server) logout(w http.ResponseWriter, _ *http.Request) {
+	http.SetCookie(w, s.sessionCookie("", time.Unix(1, 0), -1))
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+}
+
+func (s *Server) sessionCookie(value string, expires time.Time, maxAge int) *http.Cookie {
+	return &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    value,
+		Path:     "/",
+		Expires:  expires.UTC(),
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   s.cfg.AuthCookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	}
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
@@ -227,26 +299,55 @@ func (s *Server) writeError(w http.ResponseWriter, r *http.Request, status int, 
 	writeJSON(w, status, models.APIError{RequestID: requestID(r.Context()), Error: models.APIErrorBody{Code: code, Message: message}})
 }
 
-func (s *Server) auth(next http.Handler) http.Handler {
+func (s *Server) authorize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/v1/") || r.Method == http.MethodOptions {
+		if !isProtectedEndpoint(r) || r.Method == http.MethodOptions {
 			next.ServeHTTP(w, r)
 			return
 		}
-		authorization := r.Header.Get("Authorization")
-		if !strings.HasPrefix(authorization, "Bearer ") {
-			s.writeError(w, r, http.StatusUnauthorized, "unauthorized", "Требуется корректный Bearer token")
+		if s.validBearer(r.Header.Get("Authorization")) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		provided := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
-		expectedHash := sha256.Sum256([]byte(s.cfg.APIKey))
-		providedHash := sha256.Sum256([]byte(provided))
-		if subtle.ConstantTimeCompare(expectedHash[:], providedHash[:]) != 1 {
-			s.writeError(w, r, http.StatusUnauthorized, "unauthorized", "Требуется корректный Bearer token")
+		if _, ok := s.sessionUsername(r); !ok {
+			s.writeError(w, r, http.StatusUnauthorized, "unauthorized", "Требуется авторизация")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) validBearer(authorization string) bool {
+	if !strings.HasPrefix(authorization, "Bearer ") {
+		return false
+	}
+	provided := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+	expectedHash := sha256.Sum256([]byte(s.cfg.APIKey))
+	providedHash := sha256.Sum256([]byte(provided))
+	return subtle.ConstantTimeCompare(expectedHash[:], providedHash[:]) == 1
+}
+
+func (s *Server) sessionUsername(r *http.Request) (string, bool) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return "", false
+	}
+	return s.auth.Validate(cookie.Value)
+}
+
+func isProtectedEndpoint(r *http.Request) bool {
+	return r.Method == http.MethodPost && (r.URL.Path == "/v1/search" || r.URL.Path == "/v1/answer")
+}
+
+func clientIP(r *http.Request) string {
+	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(value) != nil {
+		return value
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && net.ParseIP(host) != nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func (s *Server) cors(next http.Handler) http.Handler {
@@ -258,6 +359,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if origin != "" && allowed[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -337,7 +439,7 @@ func newRequestID() string {
 }
 func endpointName(path string) string {
 	switch path {
-	case "/v1/search", "/v1/answer", "/health/live", "/health/ready", "/metrics":
+	case "/v1/search", "/v1/answer", "/v1/auth/login", "/v1/auth/session", "/v1/auth/logout", "/health/live", "/health/ready", "/metrics":
 		return path
 	default:
 		return "other"
