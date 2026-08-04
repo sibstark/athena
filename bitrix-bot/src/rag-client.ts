@@ -26,7 +26,6 @@ export class RagAnswerClient {
       headers: {
         accept: "application/json",
         "content-type": "application/json",
-        "Cookie": "athena_session=eyJ1c2VybmFtZSI6Imh3c2Nob29sIiwiZXhwaXJlc19hdCI6MTc4NTkzMDc5OH0.LsD8WEnh7sKM5txze_br9MNKGMECumV_hVf3rgy0rUo",
         ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
       },
       body: JSON.stringify({ query, collections: [this.collection] }),
