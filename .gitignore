@@ -10,3 +10,4 @@ reports/
 **/coverage/
 rag-api/server
 rag-api/coverage.out
+.vscode/

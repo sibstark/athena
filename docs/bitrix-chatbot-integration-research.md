@@ -48,15 +48,15 @@ Bitrix Chat
 
 ### Получение событий
 
-Для MVP предпочтителен `eventMode=fetch` через `imbot.v2.Event.get`:
+Для согласованного MVP выбран `eventMode=webhook` через существующий HTTPS Nginx:
 
-- не нужен публичный callback endpoint;
-- не требуется очередь или брокер;
-- бот сам контролирует повторную обработку и темп polling.
+- Bitrix отправляет POST на публичный URL;
+- Nginx завершает TLS и проксирует запрос во внутренний `bitrix-bot:8080`;
+- бот синхронно ждёт `/v1/answer`, отправляет ответ в исходный `dialogId` и только затем возвращает HTTP 200.
 
-Рекомендуемый polling — 5–30 секунд. Webhook через `eventMode=webhook` возможен при наличии стабильного HTTPS, но обработчик должен быстро вернуть HTTP 200. Bitrix не гарантирует повторную доставку webhook-события, поэтому webhook требует отдельной стратегии повторов.
+Это сохраняет требуемый сценарий «одно сообщение → один ответ» без polling, очереди и собственной базы. Вызов `/v1/answer` ограничен таймаутом, поэтому при превышении лимита Bitrix может повторить доставку. В MVP нет deduplication storage: память диалога и история сообщений намеренно не сохраняются.
 
-Перед началом polling бот регистрируется через `imbot.v2.Bot.register`, получает `botId` и использует `imbot.v2.Chat.Message.send` для ответа. Для интеграции с пользовательскими и HR-методами используется OAuth-приложение с необходимыми scopes. Общая документация: [REST authorization](https://apidocs.bitrix24.ru/api-reference/how-to-call-rest-api/authorization.html).
+Перед началом webhook-режима бот регистрируется через `imbot.v2.Bot.register` с `type=bot`, `eventMode=webhook` и `webhookUrl`, получает `botId` и использует `imbot.v2.Chat.Message.send` для ответа. Для интеграции с пользовательскими и HR-методами используется OAuth-приложение с необходимыми scopes. Общая документация: [REST authorization](https://apidocs.bitrix24.ru/api-reference/how-to-call-rest-api/authorization.html).
 
 ## Идентификация и роли пользователя
 

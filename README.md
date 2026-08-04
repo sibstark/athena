@@ -10,6 +10,7 @@ indexer/     chunks.jsonl → local E5 embeddings → Qdrant
 tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
 rag-api/     Go HTTP API → TEI + read-only Qdrant + DeepSeek
 web/         React chat UI → same-origin nginx proxy → rag-api
+bitrix-bot/  TypeScript webhook adapter → rag-api → Bitrix dialog
 data/        общие входные и выходные данные (не в Git)
 var/models/  общий кеш моделей (не в Git)
 var/qdrant/  данные Qdrant (не в Git)
@@ -72,6 +73,10 @@ bun run web:status
 ```
 
 После запуска Compose интерфейс доступен на `http://127.0.0.1:${WEB_PORT:-3000}`. Для production требуется внешний аутентифицирующий reverse proxy с TLS; встроенный web nginx отвечает только за статику и связь с `rag-api`. Подробности: [web/README.md](web/README.md).
+
+## Bitrix24 bot
+
+`bitrix-bot/` — stateless TypeScript/Bun-адаптер Chat Bots 2.0. Он получает только текущее сообщение, передаёт его в `/v1/answer` с одной коллекцией `methodology_e5_small_v1` и отправляет ответ в тот же групповой или приватный `dialogId`. История, роли, отделы и собственная БД в MVP отсутствуют. Настройка, регистрация бота и HTTPS-маршрут: [bitrix-bot/README.md](bitrix-bot/README.md).
 
 ## Production HTTPS
 
