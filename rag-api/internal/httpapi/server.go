@@ -167,7 +167,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.Found(len(results))
-	writeJSON(w, http.StatusOK, models.SearchResponse{RequestID: requestID(r.Context()), Query: options.Query, Results: results, Retrieval: models.RetrievalInfo{Collection: s.retriever.Collection(), EmbeddingModel: models.EmbeddingModel, Returned: len(results), DurationMS: duration.Milliseconds()}})
+	writeJSON(w, http.StatusOK, models.SearchResponse{RequestID: requestID(r.Context()), Query: options.Query, Results: results, Retrieval: models.RetrievalInfo{Collections: effectiveCollections(options.Collections, s.retriever.Collection()), EmbeddingModel: models.EmbeddingModel, Returned: len(results), DurationMS: duration.Milliseconds()}})
 }
 
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
@@ -183,13 +183,13 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
 	s.metrics.Found(len(results))
 	if len(results) == 0 {
 		s.metrics.Insufficient()
-		writeJSON(w, http.StatusOK, models.AnswerResponse{RequestID: requestID(r.Context()), Status: "insufficient_context", Answer: "В загруженных методических материалах не удалось найти достаточную информацию для ответа.", Sources: []models.AnswerSource{}})
+		writeJSON(w, http.StatusOK, models.AnswerResponse{RequestID: requestID(r.Context()), Status: "insufficient_context", Answer: "В переданных коллекциях не удалось найти достаточную информацию для ответа.", Sources: []models.AnswerSource{}})
 		return
 	}
 	prompt, selected := s.builder.Build(options.Query, results)
 	if len(selected) == 0 {
 		s.metrics.Insufficient()
-		writeJSON(w, http.StatusOK, models.AnswerResponse{RequestID: requestID(r.Context()), Status: "insufficient_context", Answer: "В загруженных методических материалах не удалось найти достаточную информацию для ответа.", Sources: []models.AnswerSource{}})
+		writeJSON(w, http.StatusOK, models.AnswerResponse{RequestID: requestID(r.Context()), Status: "insufficient_context", Answer: "В переданных коллекциях не удалось найти достаточную информацию для ответа.", Sources: []models.AnswerSource{}})
 		return
 	}
 	result, err := s.generator.Generate(r.Context(), contextbuilder.SystemPrompt, prompt)
@@ -271,7 +271,31 @@ func (s *Server) decodeSearchRequest(w http.ResponseWriter, r *http.Request) (mo
 		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "score_threshold должен быть от -1 до 1")
 		return models.SearchOptions{}, false
 	}
-	return models.SearchOptions{Query: query, TopK: topK, ScoreThreshold: threshold, Filters: request.Filters}, true
+	collections := make([]string, 0, len(request.Collections))
+	seenCollections := make(map[string]struct{}, len(request.Collections))
+	for _, collection := range request.Collections {
+		collection = strings.TrimSpace(collection)
+		if collection == "" {
+			s.writeError(w, r, http.StatusBadRequest, "invalid_request", "collections не должны содержать пустые значения")
+			return models.SearchOptions{}, false
+		}
+		if _, exists := seenCollections[collection]; exists {
+			continue
+		}
+		seenCollections[collection] = struct{}{}
+		collections = append(collections, collection)
+	}
+	return models.SearchOptions{Query: query, Collections: collections, TopK: topK, ScoreThreshold: threshold, Filters: request.Filters}, true
+}
+
+func effectiveCollections(requested []string, fallback string) []string {
+	if len(requested) > 0 {
+		return append([]string(nil), requested...)
+	}
+	if fallback == "" {
+		return []string{}
+	}
+	return []string{fallback}
 }
 
 func (s *Server) downstreamError(w http.ResponseWriter, r *http.Request, err error) {

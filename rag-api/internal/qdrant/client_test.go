@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,6 +37,42 @@ func TestSearchBuildsFlatPayloadFilters(t *testing.T) {
 	must := filter["must"].([]any)
 	if len(must) != 2 {
 		t.Fatalf("must=%v", must)
+	}
+}
+
+func TestSearchFanoutsAcrossRequestedCollections(t *testing.T) {
+	seen := make(map[string]bool)
+	var seenMu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		collection := r.URL.Path[len("/collections/"):]
+		collection = collection[:len(collection)-len("/points/search")]
+		seenMu.Lock()
+		seen[collection] = true
+		seenMu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{
+			"id":      collection,
+			"score":   0.8,
+			"payload": map[string]any{"chunk_id": collection + "_chunk"},
+		}}})
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, nil)
+	hits, err := client.Search(t.Context(), SearchParams{
+		Vector:      []float64{1},
+		Limit:       8,
+		Collections: []string{"methodology_e5_small_v1", "accounting_e5_small_v1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || !seen["methodology_e5_small_v1"] || !seen["accounting_e5_small_v1"] {
+		t.Fatalf("seen=%v hits=%+v", seen, hits)
+	}
+	for _, hit := range hits {
+		if hit.Collection == "" {
+			t.Fatalf("hit has no collection: %+v", hit)
+		}
 	}
 }
 

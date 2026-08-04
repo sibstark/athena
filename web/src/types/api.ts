@@ -1,5 +1,6 @@
 export type Source = {
   source_id: string
+  collection?: string
   chunk_id: string
   document_id: string
   score: number
@@ -45,7 +46,7 @@ export type SearchResponse = {
   query: string
   results: SearchResult[]
   retrieval: {
-    collection: string
+    collections: string[]
     embedding_model: string
     returned: number
     duration_ms: number

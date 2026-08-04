@@ -45,6 +45,27 @@ func TestSearchDeduplicatesHashAndNormalizedContent(t *testing.T) {
 		t.Fatalf("limit=%d", searcher.params.Limit)
 	}
 }
+
+func TestSearchPassesRequestedCollectionsWithOneEmbedding(t *testing.T) {
+	embedder := &fakeEmbedder{}
+	searcher := &fakeSearcher{}
+	service := New(embedder, searcher, 20)
+
+	_, _, err := service.Search(t.Context(), models.SearchOptions{
+		Query:       "q",
+		TopK:        8,
+		Collections: []string{"methodology_e5_small_v1", "accounting_e5_small_v1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedder.called != 1 {
+		t.Fatalf("embedding calls=%d", embedder.called)
+	}
+	if len(searcher.params.Collections) != 2 {
+		t.Fatalf("collections=%v", searcher.params.Collections)
+	}
+}
 func payload(id, hash, content string) map[string]any {
 	return map[string]any{"chunk_id": id, "document_id": "page_1", "content": content, "content_hash": hash, "breadcrumbs": []any{"Root"}, "heading_path": []any{}}
 }

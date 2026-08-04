@@ -25,10 +25,12 @@ type fakeRetriever struct {
 	err     error
 	calls   atomic.Int32
 	wait    bool
+	options []models.SearchOptions
 }
 
-func (f *fakeRetriever) Search(ctx context.Context, _ models.SearchOptions) ([]models.SearchResult, time.Duration, error) {
+func (f *fakeRetriever) Search(ctx context.Context, options models.SearchOptions) ([]models.SearchResult, time.Duration, error) {
 	f.calls.Add(1)
+	f.options = append(f.options, options)
 	if f.wait {
 		<-ctx.Done()
 		return nil, 0, ctx.Err()
@@ -239,11 +241,29 @@ func TestAnswerReturnsOnlyMentionedQdrantSources(t *testing.T) {
 	}
 	var result models.AnswerResponse
 	json.NewDecoder(response.Body).Decode(&result)
-	if len(result.Sources) != 1 || result.Sources[0].ChunkID != "chunk_1" {
+	if len(result.Sources) != 1 || result.Sources[0].ChunkID != "chunk_1" || result.Sources[0].Collection != "methodology_e5_small_v1" {
 		t.Fatalf("sources=%+v", result.Sources)
 	}
 	if strings.Contains(generator.prompts[0], "Второй") == false {
 		t.Fatal("selected context missing")
+	}
+}
+
+func TestAnswerPassesCollectionsToRetriever(t *testing.T) {
+	retriever := &fakeRetriever{}
+	response := perform(testServer(retriever, &fakeGenerator{}).Handler(), "/v1/answer", `{"query":"q","collections":["accounting_e5_small_v1"]}`, "key")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(retriever.options) != 1 || len(retriever.options[0].Collections) != 1 || retriever.options[0].Collections[0] != "accounting_e5_small_v1" {
+		t.Fatalf("options=%+v", retriever.options)
+	}
+}
+
+func TestAnswerRejectsEmptyCollectionName(t *testing.T) {
+	response := perform(testServer(&fakeRetriever{}, &fakeGenerator{}).Handler(), "/v1/answer", `{"query":"q","collections":[""]}`, "key")
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "collections") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -317,5 +337,5 @@ func perform(handler http.Handler, path, body, key string) *httptest.ResponseRec
 	return response
 }
 func sampleResults() []models.SearchResult {
-	return []models.SearchResult{{SourceID: "S1", ChunkID: "chunk_1", DocumentID: "page_1", Score: .9, Content: "Первый", Title: "Документ 1", Breadcrumbs: []string{"Root"}}, {SourceID: "S2", ChunkID: "chunk_2", DocumentID: "page_2", Score: .8, Content: "Второй", Title: "Документ 2", Breadcrumbs: []string{"Root"}}}
+	return []models.SearchResult{{SourceID: "S1", Collection: "methodology_e5_small_v1", ChunkID: "chunk_1", DocumentID: "page_1", Score: .9, Content: "Первый", Title: "Документ 1", Breadcrumbs: []string{"Root"}}, {SourceID: "S2", Collection: "accounting_e5_small_v1", ChunkID: "chunk_2", DocumentID: "page_2", Score: .8, Content: "Второй", Title: "Документ 2", Breadcrumbs: []string{"Root"}}}
 }

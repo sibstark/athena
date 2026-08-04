@@ -1,6 +1,6 @@
 # Athena RAG API
 
-Отдельный stateless Go-сервис объединяет существующие Rust TEI и Qdrant с внешним DeepSeek Chat Completions API. Сервис не записывает данные в Qdrant и не запускает puller, normalizer, chunker или indexer.
+Отдельный stateless Go-сервис объединяет существующие Rust TEI и Qdrant с внешним DeepSeek Chat Completions API. Сервис не записывает данные в Qdrant и не запускает puller, normalizer, chunker или indexer. Он не знает о Bitrix, ролях и вызывающих приложениях: клиент сам передаёт коллекции, в которых нужно искать.
 
 ```text
 POST /v1/search → TEI query embedding → Qdrant read-only search
@@ -130,6 +130,7 @@ curl -sS http://127.0.0.1:8090/v1/search \
   -H 'Content-Type: application/json' \
   -d '{
     "query": "Как провести урок по цифре 5?",
+    "collections": ["methodology_e5_small_v1"],
     "top_k": 8,
     "score_threshold": 0.65,
     "filters": {
@@ -140,7 +141,7 @@ curl -sS http://127.0.0.1:8090/v1/search \
   }'
 ```
 
-Поддерживаются только реальные плоские payload-поля Qdrant: `document_id`, `parent_document_id`, `page_id`, `parent_page_id`, `root_page_id`, `language`, `category`, `status`. Вложенные `metadata.*` не принимаются.
+Поддерживаются только реальные плоские payload-поля Qdrant: `document_id`, `parent_document_id`, `page_id`, `parent_page_id`, `root_page_id`, `language`, `category`, `status`. Вложенные `metadata.*` не принимаются. Поле `collections` выбирает коллекции Qdrant; оно не является ACL и не содержит контекста пользователя.
 
 ## Ответ с источниками
 
@@ -148,10 +149,26 @@ curl -sS http://127.0.0.1:8090/v1/search \
 curl -sS http://127.0.0.1:8090/v1/answer \
   -H "Authorization: Bearer ${RAG_API_KEY}" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"Как провести урок по цифре 5?","top_k":8}'
+  -d '{"query":"Как провести урок по цифре 5?","collections":["methodology_e5_small_v1"],"top_k":8}'
 ```
 
 `/v1/answer` отправляет во внешний DeepSeek API вопрос и только выбранные после threshold/deduplication чанки. Если контекста нет, DeepSeek не вызывается. Цитаты проверяются; metadata источников всегда берётся из Qdrant, а не из текста модели.
+
+### Поиск по нескольким коллекциям
+
+`collections` может содержать несколько имён:
+
+```json
+{
+  "query": "Какие правила начисления зарплаты?",
+  "collections": [
+    "methodology_e5_small_v1",
+    "salary_e5_small_v1"
+  ]
+}
+```
+
+TEI вызывается один раз. Затем API параллельно выполняет поиск в каждой переданной коллекции, объединяет результаты, удаляет дубли и формирует общий контекст. Пустой список использует существующую `QDRANT_COLLECTION` для обратной совместимости; новые машинные клиенты должны передавать коллекции явно.
 
 ## Тесты и сборка
 
@@ -178,6 +195,7 @@ bun run rag:compat:tei -- \
 ## Безопасность
 
 - `/v1/search` и `/v1/answer` принимают либо пользовательскую session cookie, либо `RAG_API_KEY` для внутренних CLI и машинных клиентов.
+- Выбор коллекций является входным параметром доверенного клиента; API не определяет права пользователя и не интерпретирует роли.
 - Auth endpoints, healthcheck и metrics не требуют Bearer token.
 - Пароли хранятся только как bcrypt-хеши; session cookie подписывается HMAC-SHA256 и проверяется constant-time сравнением.
 - Секреты, вопросы, контекст, ответы и vectors не пишутся в штатные логи.

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sibstark/athena/rag-api/internal/models"
@@ -33,13 +34,15 @@ type Snapshot struct {
 }
 
 type Hit struct {
-	ID      string
-	Score   float64
-	Payload map[string]any
+	ID         string
+	Collection string
+	Score      float64
+	Payload    map[string]any
 }
 
 type SearchParams struct {
 	Vector         []float64
+	Collections    []string
 	Limit          int
 	ScoreThreshold float64
 	Filters        models.Filters
@@ -103,6 +106,48 @@ func (c *Client) Search(ctx context.Context, params SearchParams) ([]Hit, error)
 }
 
 func (c *Client) search(ctx context.Context, params SearchParams) ([]Hit, error) {
+	collections := params.Collections
+	if len(collections) == 0 {
+		if c.collection == "" {
+			return nil, fmt.Errorf("qdrant collection is required")
+		}
+		collections = []string{c.collection}
+	}
+
+	results := make([][]Hit, len(collections))
+	errors := make([]error, len(collections))
+	searchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var group sync.WaitGroup
+	for index, collection := range collections {
+		collection := strings.TrimSpace(collection)
+		if collection == "" {
+			return nil, fmt.Errorf("qdrant collection must not be empty")
+		}
+		group.Add(1)
+		go func(index int, collection string) {
+			defer group.Done()
+			results[index], errors[index] = c.searchCollection(searchCtx, collection, params)
+			if errors[index] != nil {
+				cancel()
+			}
+		}(index, collection)
+	}
+	group.Wait()
+	for _, err := range errors {
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	hits := make([]Hit, 0)
+	for _, collectionHits := range results {
+		hits = append(hits, collectionHits...)
+	}
+	return hits, nil
+}
+
+func (c *Client) searchCollection(ctx context.Context, collection string, params SearchParams) ([]Hit, error) {
 	body := map[string]any{"vector": params.Vector, "limit": params.Limit, "score_threshold": params.ScoreThreshold, "with_payload": true, "with_vector": false}
 	if filter := buildFilter(params.Filters); filter != nil {
 		body["filter"] = filter
@@ -114,13 +159,13 @@ func (c *Client) search(ctx context.Context, params SearchParams) ([]Hit, error)
 			Payload map[string]any `json:"payload"`
 		} `json:"result"`
 	}
-	path := "/collections/" + url.PathEscape(c.collection) + "/points/search"
+	path := "/collections/" + url.PathEscape(collection) + "/points/search"
 	if err := c.doJSON(ctx, http.MethodPost, path, body, &response); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrQdrantUnavailable, err)
 	}
 	hits := make([]Hit, 0, len(response.Result))
 	for _, item := range response.Result {
-		hits = append(hits, Hit{ID: fmt.Sprint(item.ID), Score: item.Score, Payload: item.Payload})
+		hits = append(hits, Hit{ID: fmt.Sprint(item.ID), Collection: collection, Score: item.Score, Payload: item.Payload})
 	}
 	return hits, nil
 }

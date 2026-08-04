@@ -52,7 +52,7 @@ describe("requestAnswer", () => {
             },
           ],
           retrieval: {
-            collection: "collection",
+            collections: ["collection"],
             embedding_model: "model",
             returned: 1,
             duration_ms: 10,
@@ -70,5 +70,34 @@ describe("requestAnswer", () => {
       source_id: "S1",
       content: "Фрагмент",
     })
+  })
+
+  it("может передать список коллекций в универсальный API", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          request_id: "req-collections",
+          status: "insufficient_context",
+          answer: "Нет контекста",
+          sources: [],
+        }),
+        { status: 200 },
+      ),
+    )
+
+    await requestAnswer("Вопрос", {
+      collections: ["accounting_e5_small_v1"],
+      fetchImpl,
+    })
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/v1/answer",
+      expect.objectContaining({
+        body: JSON.stringify({
+          query: "Вопрос",
+          collections: ["accounting_e5_small_v1"],
+        }),
+      }),
+    )
   })
 })

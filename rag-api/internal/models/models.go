@@ -34,6 +34,7 @@ type Filters struct {
 
 type SearchRequest struct {
 	Query          string   `json:"query"`
+	Collections    []string `json:"collections,omitempty"`
 	TopK           *int     `json:"top_k,omitempty"`
 	ScoreThreshold *float64 `json:"score_threshold,omitempty"`
 	Filters        Filters  `json:"filters,omitempty"`
@@ -41,6 +42,7 @@ type SearchRequest struct {
 
 type SearchOptions struct {
 	Query          string
+	Collections    []string
 	TopK           int
 	ScoreThreshold float64
 	Filters        Filters
@@ -48,6 +50,7 @@ type SearchOptions struct {
 
 type SearchResult struct {
 	SourceID        string         `json:"source_id"`
+	Collection      string         `json:"collection"`
 	ChunkID         string         `json:"chunk_id"`
 	DocumentID      string         `json:"document_id"`
 	Score           float64        `json:"score"`
@@ -64,10 +67,10 @@ type SearchResult struct {
 }
 
 type RetrievalInfo struct {
-	Collection     string `json:"collection"`
-	EmbeddingModel string `json:"embedding_model"`
-	Returned       int    `json:"returned"`
-	DurationMS     int64  `json:"duration_ms"`
+	Collections    []string `json:"collections"`
+	EmbeddingModel string   `json:"embedding_model"`
+	Returned       int      `json:"returned"`
+	DurationMS     int64    `json:"duration_ms"`
 }
 
 type SearchResponse struct {
@@ -79,6 +82,7 @@ type SearchResponse struct {
 
 type AnswerSource struct {
 	SourceID     string   `json:"source_id"`
+	Collection   string   `json:"collection"`
 	ChunkID      string   `json:"chunk_id"`
 	DocumentID   string   `json:"document_id"`
 	Score        float64  `json:"score"`
@@ -124,7 +128,7 @@ type APIErrorBody struct {
 
 func (result SearchResult) SourceMetadata() AnswerSource {
 	return AnswerSource{
-		SourceID: result.SourceID, ChunkID: result.ChunkID, DocumentID: result.DocumentID,
+		SourceID: result.SourceID, Collection: result.Collection, ChunkID: result.ChunkID, DocumentID: result.DocumentID,
 		Score: result.Score, Title: result.Title, Source: result.Source,
 		Breadcrumbs: result.Breadcrumbs, HeadingPath: result.HeadingPath, SectionTitle: result.SectionTitle,
 	}

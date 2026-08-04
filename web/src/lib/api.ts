@@ -21,14 +21,23 @@ export class RAGAPIError extends Error {
 
 export async function requestAnswer(
   query: string,
-  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  options: {
+    collections?: string[]
+    signal?: AbortSignal
+    fetchImpl?: typeof fetch
+  } = {},
 ): Promise<AnswerResponse> {
   const fetchImpl = options.fetchImpl ?? fetch
   const response = await fetchImpl("/v1/answer", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      ...(options.collections === undefined
+        ? {}
+        : { collections: options.collections }),
+    }),
     signal: options.signal,
   })
 
@@ -87,6 +96,7 @@ export async function requestAnswer(
 export async function requestSearch(
   query: string,
   options: {
+    collections?: string[]
     topK?: number
     scoreThreshold?: number
     filters?: SearchFilters
@@ -101,6 +111,9 @@ export async function requestSearch(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
+      ...(options.collections === undefined
+        ? {}
+        : { collections: options.collections }),
       ...(options.topK === undefined ? {} : { top_k: options.topK }),
       ...(options.scoreThreshold === undefined
         ? {}
@@ -133,7 +146,11 @@ export async function requestSearch(
     query: stringValue(payload.query),
     results: payload.results.flatMap(parseSearchResult),
     retrieval: {
-      collection: stringValue(retrieval.collection),
+      collections: Array.isArray(retrieval.collections)
+        ? stringArray(retrieval.collections)
+        : typeof retrieval.collection === "string"
+          ? [retrieval.collection]
+          : [],
       embedding_model: stringValue(retrieval.embedding_model),
       returned: numberValue(retrieval.returned),
       duration_ms: numberValue(retrieval.duration_ms),
@@ -163,6 +180,9 @@ function parseSource(value: unknown): Source[] {
   return [
     {
       source_id: value.source_id,
+      ...(typeof value.collection === "string"
+        ? { collection: value.collection }
+        : {}),
       chunk_id: stringValue(value.chunk_id),
       document_id: stringValue(value.document_id),
       score: numberValue(value.score),
