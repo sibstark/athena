@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -37,44 +36,24 @@ type BitrixEventChat struct {
 	DialogId string `json:"dialogId"`
 }
 
-type BitrixEvent struct {
-	Event            string             `json:"event"`
-	ApplicationToken string             `json:"applicationToken"`
-	Message          BitrixEventMessage `json:"message"`
-	Bot              BitrixEventBot     `json:"bot"`
-	Chat             BitrixEventChat    `json:"chat"`
-}
-
 var defaultFallbackMessage = "Извините, сейчас не удалось получить ответ. Попробуйте повторить запрос позже."
 
-func CreateWebhookHandler(options Options) func(req *http.Request) http.Response {
-	return func(req *http.Request) http.Response {
+func CreateWebhookHandler(options Options) func(req *http.Request) (statusCode int, status string) {
+	return func(req *http.Request) (statusCode int, status string) {
 		if req.Method != http.MethodPost {
-			return http.Response{
-				StatusCode: http.StatusMethodNotAllowed,
-				Status:     "405 Not Allowed",
-			}
+			return http.StatusMethodNotAllowed, "405 Not Allowed"
 		}
-		var event BitrixEvent
-		if err := json.NewDecoder(req.Body).Decode(&event); err != nil {
-			return http.Response{
-				StatusCode: http.StatusBadRequest,
-				Status:     "400 Bad request",
-			}
+		event, err := Parse(req)
+		if err != nil {
+			return http.StatusBadRequest, "400 Bad request"
 		}
 
 		if event.ApplicationToken != options.Options.ApplicationToken {
-			return http.Response{
-				StatusCode: http.StatusUnauthorized,
-				Status:     "401 Not Authorized",
-			}
+			return http.StatusUnauthorized, "401 Not Authorized"
 		}
 
 		if event.Message.AuthorId == event.Bot.Id || event.Message.IsSystem || event.Event != "ONIMBOTV2MESSAGEADD" {
-			return http.Response{
-				StatusCode: http.StatusOK,
-				Status:     "200 Success",
-			}
+			return http.StatusOK, "200 Success"
 		}
 
 		go func(dialogId string, message string) {
@@ -93,9 +72,6 @@ func CreateWebhookHandler(options Options) func(req *http.Request) http.Response
 			defer cancel()
 		}(event.Chat.DialogId, event.Message.Text)
 
-		return http.Response{
-			StatusCode: http.StatusOK,
-			Status:     "200 Success",
-		}
+		return http.StatusOK, "200 Success"
 	}
 }
