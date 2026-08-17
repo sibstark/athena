@@ -13,8 +13,8 @@ func TestLoadRequiredEnvs(t *testing.T) {
 		"REST_WEBHOOK_URL",
 		"BOT_ID",
 		"BOT_TOKEN",
-		"RAG_API_URL",
-		"RAG_API_KEY",
+		"API_URL",
+		"API_KEY",
 		"COLLECTION",
 		"REQUEST_TIMEOUT_MS",
 	}
@@ -41,8 +41,8 @@ func TestMustContainsAllRequiredEnvs(t *testing.T) {
 	t.Setenv("REST_WEBHOOK_URL", "http://localhost:8080/webhook")
 	t.Setenv("BOT_ID", "test-bot-id")
 	t.Setenv("BOT_TOKEN", "test-bot-token")
-	t.Setenv("RAG_API_URL", "http://localhost:8080/rag")
-	t.Setenv("RAG_API_KEY", "test-rag-api-key")
+	t.Setenv("API_URL", "http://localhost:8080/rag")
+	t.Setenv("API_KEY", "test-api-key")
 	t.Setenv("COLLECTION", "test-collection")
 	t.Setenv("REQUEST_TIMEOUT_MS", "5000")
 	cfg, err := Load()
@@ -57,8 +57,8 @@ func TestMustContainsAllRequiredEnvs(t *testing.T) {
 		RestWebhookUrl:   "http://localhost:8080/webhook",
 		BotId:            0,
 		BotToken:         "test-bot-token",
-		RagApiUrl:        "http://localhost:8080/rag",
-		RagApiKey:        "test-rag-api-key",
+		ApiUrl:           "http://localhost:8080/rag",
+		ApiKey:           "test-api-key",
 		Collection:       "test-collection",
 		RequestTimeoutMs: 5000,
 	}

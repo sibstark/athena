@@ -14,8 +14,8 @@ type Config struct {
 	RestWebhookUrl   string
 	BotId            int
 	BotToken         string
-	RagApiUrl        string
-	RagApiKey        string
+	ApiUrl           string
+	ApiKey           string
 	Collection       string
 	RequestTimeoutMs int
 }
@@ -29,10 +29,10 @@ func Load() (Config, error) {
 		WebhookPath:      os.Getenv("WEBHOOK_PATH"),
 		ApplicationToken: os.Getenv("APPLICATION_TOKEN"),
 		RestWebhookUrl:   os.Getenv("REST_WEBHOOK_URL"),
-		BotId:            envInt(os.Getenv("BotId"), 0),
+		BotId:            envInt(os.Getenv("BOT_ID"), 0),
 		BotToken:         os.Getenv("BOT_TOKEN"),
-		RagApiUrl:        os.Getenv("RAG_API_URL"),
-		RagApiKey:        os.Getenv("RAG_API_KEY"),
+		ApiUrl:           os.Getenv("API_URL"),
+		ApiKey:           os.Getenv("API_KEY"),
 		Collection:       os.Getenv("COLLECTION"),
 		RequestTimeoutMs: envInt(os.Getenv("REQUEST_TIMEOUT_MS"), 5000),
 	}
@@ -56,8 +56,8 @@ func validateEnvirnonment() error {
 		"REST_WEBHOOK_URL",
 		"BOT_ID",
 		"BOT_TOKEN",
-		"RAG_API_URL",
-		"RAG_API_KEY",
+		"API_URL",
+		"API_KEY",
 		"COLLECTION",
 		"REQUEST_TIMEOUT_MS",
 	}

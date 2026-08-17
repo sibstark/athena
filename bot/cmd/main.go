@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/sibstark/athena/bot/internal/api"
@@ -16,38 +14,32 @@ import (
 )
 
 func main() {
-	err := run()
+	err := run(context.Background())
 	if err != nil {
 		fmt.Printf("init bot run err %s", err.Error())
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(ctx context.Context) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("configuration err %w", err)
 	}
-	apiClient, err := api.New(cfg.RagApiUrl, api.Options{
-		ApiKey:     cfg.RagApiKey,
+	apiClient, err := api.New(cfg.ApiUrl, api.Options{
+		ApiKey:     cfg.ApiKey,
 		Collection: cfg.Collection,
 	})
 	if err != nil {
 		return fmt.Errorf("API client initialization err %w", err)
 	}
-	bitrixClient, err := bitrix.New(cfg.WebhookPath, bitrix.Options{
+	bitrixClient, err := bitrix.New(cfg.RestWebhookUrl, bitrix.Options{
 		BotId:    cfg.BotId,
-		BotToken: cfg.ApplicationToken,
+		BotToken: cfg.BotToken,
 	})
 	if err != nil {
 		return fmt.Errorf("Bitrix client initialization err %w", err)
 	}
-	ctx, stopServer := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-	defer stopServer()
 	webhook := webhook.CreateWebhookHandler(webhook.Options{
 		Api:    apiClient,
 		Bitrix: bitrixClient,
@@ -81,11 +73,6 @@ func run() error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	_ = server.Shutdown(ctx)
 	fmt.Printf("server listening on port %s\n", cfg.Port)
-
-	if err := server.ListenAndServe(); err != nil {
-		return fmt.Errorf("HTTP server failed: %w", err)
-	}
-	return nil
+	return server.ListenAndServe()
 }
