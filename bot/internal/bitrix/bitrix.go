@@ -7,15 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 var baseUrl = "imbot.v2.Chat.Message.send"
 
 type Options struct {
-	BotId     int
-	BotToken  string
-	TimeoutMs int
+	BotId    int
+	BotToken string
 }
 
 type BitrixClient struct {
@@ -42,15 +40,14 @@ func New(webhook string, options Options) (*BitrixClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	httpClient := http.Client{
-		Timeout: time.Duration(options.TimeoutMs) * time.Millisecond,
-	}
-	return &BitrixClient{
+	httpClient := http.Client{}
+	bc := BitrixClient{
 		endpoint:   endpoint,
 		botId:      options.BotId,
 		botToken:   options.BotToken,
 		httpClient: &httpClient,
-	}, nil
+	}
+	return &bc, nil
 }
 
 func (c *BitrixClient) Send(ctx context.Context, dialogId string, message string) error {

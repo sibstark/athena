@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestNewClient(t *testing.T) {
@@ -18,9 +17,8 @@ func TestNewClient(t *testing.T) {
 	})
 
 	options := Options{
-		BotId:     42,
-		BotToken:  "test-bot-token",
-		TimeoutMs: 5000,
+		BotId:    42,
+		BotToken: "test-bot-token",
 	}
 
 	client, err := New("webhook", options)
@@ -38,10 +36,6 @@ func TestNewClient(t *testing.T) {
 	}
 	if client.botToken != options.BotToken {
 		t.Fatalf("Expected botToken %s, got %s", options.BotToken, client.botToken)
-	}
-	expectedTimeout := time.Duration(options.TimeoutMs) * time.Millisecond
-	if client.httpClient.Timeout != expectedTimeout {
-		t.Fatalf("Expected timeout %v, got %v", expectedTimeout, client.httpClient.Timeout)
 	}
 }
 

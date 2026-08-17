@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestNewClient(t *testing.T) {
@@ -15,7 +14,6 @@ func TestNewClient(t *testing.T) {
 	options := Options{
 		ApiKey:     "test-api-key",
 		Collection: "test-collection",
-		TimeoutMs:  5000,
 	}
 	client, err := New(baseUrl, options)
 	if err != nil {
@@ -29,9 +27,6 @@ func TestNewClient(t *testing.T) {
 	}
 	if client.collection != options.Collection {
 		t.Fatalf("Expected collection %s, got %s", options.Collection, client.collection)
-	}
-	if client.httpClient.Timeout != (time.Duration(options.TimeoutMs) * time.Millisecond) {
-		t.Fatalf("Expected timeout %v, got %v", time.Duration(options.TimeoutMs)*time.Millisecond, client.httpClient.Timeout)
 	}
 	t.Logf("Client created successfully: %v", client)
 }
@@ -57,7 +52,6 @@ func TestCallAnswer(t *testing.T) {
 	client, _ := New(server.URL, Options{
 		ApiKey:     "key",
 		Collection: "test",
-		TimeoutMs:  1000,
 	})
 	ctx := context.Background()
 	client.Answer(ctx, "test query")
@@ -83,7 +77,6 @@ func TestWrongHTTPStatusCode(t *testing.T) {
 			client, _ := New(server.URL, Options{
 				ApiKey:     "key",
 				Collection: "test",
-				TimeoutMs:  1000,
 			})
 
 			_, err := client.Answer(context.Background(), "test query")

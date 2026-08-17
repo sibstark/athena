@@ -7,13 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 type Options struct {
 	ApiKey     string
 	Collection string
-	TimeoutMs  int
 }
 
 type APIClient struct {
@@ -37,9 +35,7 @@ func New(baseUrl string, options Options) (*APIClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Path error faced %w", err)
 	}
-	client := http.Client{
-		Timeout: time.Duration(options.TimeoutMs) * time.Millisecond,
-	}
+	client := http.Client{}
 	return &APIClient{
 		endpoint:   endpoint,
 		apiKey:     options.ApiKey,
