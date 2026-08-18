@@ -33,8 +33,11 @@ func TestNewClient(t *testing.T) {
 
 func TestCallAnswer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
+		if r.Method != http.MethodPost {
 			t.Fatalf("Expected POST method, got %s", r.Method)
+		}
+		if r.Header.Get("Authorization") != "Bearer key" {
+			t.Fatalf("Expected Bearer authorization, got %q", r.Header.Get("Authorization"))
 		}
 		var req answerRequest
 		err := json.NewDecoder(r.Body).Decode(&req)
@@ -44,17 +47,24 @@ func TestCallAnswer(t *testing.T) {
 		if req.Query != "test query" {
 			t.Fatalf("Expected query 'test query', got '%s'", req.Query)
 		}
-		if req.Collection != "test" {
-			t.Fatalf("Expected collection 'test', got '%s'", req.Collection)
+		if len(req.Collections) != 1 || req.Collections[0] != "test" {
+			t.Fatalf("Expected collections ['test'], got %v", req.Collections)
 		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"answer":"test answer"}`))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 	client, _ := New(server.URL, Options{
 		ApiKey:     "key",
 		Collection: "test",
 	})
-	ctx := context.Background()
-	client.Answer(ctx, "test query")
+	answer, err := client.Answer(context.Background(), "test query")
+	if err != nil {
+		t.Fatalf("Answer() error = %v", err)
+	}
+	if answer != "test answer" {
+		t.Fatalf("Answer() = %q", answer)
+	}
 }
 
 func TestWrongHTTPStatusCode(t *testing.T) {

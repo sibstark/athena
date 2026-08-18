@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -10,22 +11,41 @@ import (
 	"github.com/sibstark/athena/bot/internal/api"
 	"github.com/sibstark/athena/bot/internal/bitrix"
 	"github.com/sibstark/athena/bot/internal/config"
+	"github.com/sibstark/athena/bot/internal/logging"
 	"github.com/sibstark/athena/bot/internal/webhook"
 )
 
 func main() {
-	err := run(context.Background())
-	if err != nil {
-		fmt.Printf("init bot run err %s", err.Error())
-		os.Exit(1)
-	}
+	os.Exit(execute())
 }
 
-func run(ctx context.Context) error {
+func execute() int {
 	cfg, err := config.Load()
 	if err != nil {
-		return fmt.Errorf("configuration err %w", err)
+		_, _ = fmt.Fprintf(os.Stderr, "configuration error: %v\n", err)
+		return 1
 	}
+
+	appLogger, err := logging.New(cfg.LogDir)
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "logger initialization error: %v\n", err)
+		return 1
+	}
+	slog.SetDefault(appLogger.Logger)
+
+	exitCode := 0
+	if err := run(context.Background(), cfg, appLogger.Logger); err != nil {
+		appLogger.Error("application stopped with error", "error", err)
+		exitCode = 1
+	}
+	if err := appLogger.Close(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "logger close error: %v\n", err)
+		exitCode = 1
+	}
+	return exitCode
+}
+
+func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	apiClient, err := api.New(cfg.ApiUrl, api.Options{
 		ApiKey:     cfg.ApiKey,
 		Collection: cfg.Collection,
@@ -40,9 +60,10 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("Bitrix client initialization err %w", err)
 	}
-	webhook := webhook.CreateWebhookHandler(webhook.Options{
+	webhookHandler := webhook.CreateWebhookHandler(webhook.Options{
 		Api:    apiClient,
 		Bitrix: bitrixClient,
+		Logger: logger,
 		Options: webhook.WebhookOptions{
 			ApplicationToken: cfg.ApplicationToken,
 			Collection:       cfg.Collection,
@@ -52,19 +73,34 @@ func run(ctx context.Context) error {
 	})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		startedAt := time.Now()
 		path := request.URL.Path
+		statusCode := http.StatusNotFound
+		responseBody := "Not found"
+
 		switch {
 		case path == "/health/live" && request.Method == http.MethodGet:
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("Ok"))
+			statusCode = http.StatusOK
+			responseBody = "Ok"
 		case path == cfg.WebhookPath:
-			statusCode, status := webhook(request)
-			w.WriteHeader(statusCode)
-			_, _ = w.Write([]byte(status))
+			statusCode, responseBody = webhookHandler(request)
+		}
 
-		default:
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte("Not found"))
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(statusCode)
+		if _, err := w.Write([]byte(responseBody)); err != nil {
+			logger.WarnContext(request.Context(), "HTTP response write failed", "error", err)
+		}
+
+		if path != "/health/live" || request.Method != http.MethodGet {
+			logger.InfoContext(
+				request.Context(),
+				"HTTP request completed",
+				"method", request.Method,
+				"path", path,
+				"status", statusCode,
+				"duration_ms", time.Since(startedAt).Milliseconds(),
+			)
 		}
 	})
 
@@ -73,6 +109,6 @@ func run(ctx context.Context) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	fmt.Printf("server listening on port %s\n", cfg.Port)
+	logger.Info("server listening", "port", cfg.Port, "webhook_path", cfg.WebhookPath)
 	return server.ListenAndServe()
 }

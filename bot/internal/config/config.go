@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Port             string
 	WebhookPath      string
+	LogDir           string
 	ApplicationToken string
 	RestWebhookUrl   string
 	BotId            int
@@ -27,6 +28,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		Port:             os.Getenv("PORT"),
 		WebhookPath:      os.Getenv("WEBHOOK_PATH"),
+		LogDir:           envString(os.Getenv("LOG_DIR"), "./logs"),
 		ApplicationToken: os.Getenv("APPLICATION_TOKEN"),
 		RestWebhookUrl:   os.Getenv("REST_WEBHOOK_URL"),
 		BotId:            envInt(os.Getenv("BOT_ID"), 0),
@@ -37,6 +39,13 @@ func Load() (Config, error) {
 		RequestTimeoutMs: envInt(os.Getenv("REQUEST_TIMEOUT_MS"), 5000),
 	}
 	return cfg, nil
+}
+
+func envString(value, fallback string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func envInt(value string, fallback int) int {

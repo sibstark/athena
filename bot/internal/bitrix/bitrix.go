@@ -9,7 +9,7 @@ import (
 	"net/url"
 )
 
-var baseUrl = "imbot.v2.Chat.Message.send"
+const sendMessageMethod = "imbot.v2.Chat.Message.send"
 
 type Options struct {
 	BotId    int
@@ -35,7 +35,7 @@ type bitrixRequest struct {
 }
 
 func New(webhook string, options Options) (*BitrixClient, error) {
-	endpoint, err := url.JoinPath(baseUrl, webhook)
+	endpoint, err := url.JoinPath(webhook, sendMessageMethod)
 
 	if err != nil {
 		return nil, err
@@ -69,6 +69,7 @@ func (c *BitrixClient) Send(ctx context.Context, dialogId string, message string
 	if err != nil {
 		return err
 	}
+	defer res.Body.Close()
 	if err := checkStatusCode(res); err != nil {
 		return err
 	}

@@ -22,8 +22,8 @@ type APIClient struct {
 }
 
 type answerRequest struct {
-	Query      string `json:"query"`
-	Collection string `json:"collection"`
+	Query       string   `json:"query"`
+	Collections []string `json:"collections"`
 }
 
 type answerResponse struct {
@@ -46,8 +46,8 @@ func New(baseUrl string, options Options) (*APIClient, error) {
 
 func (c *APIClient) Answer(ctx context.Context, query string) (string, error) {
 	body, err := json.Marshal(answerRequest{
-		Query:      query,
-		Collection: c.collection,
+		Query:       query,
+		Collections: []string{c.collection},
 	})
 	if err != nil {
 		return "", err

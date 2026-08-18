@@ -10,26 +10,21 @@ import (
 )
 
 func TestNewClient(t *testing.T) {
-	originalBaseURL := baseUrl
-	baseUrl = "http://localhost:8080"
-	t.Cleanup(func() {
-		baseUrl = originalBaseURL
-	})
-
 	options := Options{
 		BotId:    42,
 		BotToken: "test-bot-token",
 	}
 
-	client, err := New("webhook", options)
+	client, err := New("https://portal.bitrix24.test/rest/1/webhook-code/", options)
 	if err != nil {
 		t.Fatalf("Error creating client: %v", err)
 	}
 	if client == nil {
 		t.Fatal("Expected client, got nil")
 	}
-	if client.endpoint != "http://localhost:8080/webhook" {
-		t.Fatalf("Expected endpoint %s, got %s", "http://localhost:8080/webhook", client.endpoint)
+	expectedEndpoint := "https://portal.bitrix24.test/rest/1/webhook-code/imbot.v2.Chat.Message.send"
+	if client.endpoint != expectedEndpoint {
+		t.Fatalf("Expected endpoint %s, got %s", expectedEndpoint, client.endpoint)
 	}
 	if client.botId != options.BotId {
 		t.Fatalf("Expected botId %d, got %d", options.BotId, client.botId)
