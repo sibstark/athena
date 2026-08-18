@@ -77,6 +77,7 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		path := request.URL.Path
 		statusCode := http.StatusNotFound
 		responseBody := "Not found"
+		logger.WarnContext(request.Context(), "Request recieved")
 
 		switch {
 		case path == "/health/live" && request.Method == http.MethodGet:
