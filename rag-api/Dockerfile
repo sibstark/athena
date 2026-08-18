@@ -1,4 +1,4 @@
-ARG GO_IMAGE=golang:1.25.5-alpine3.22@sha256:3587db7cc96576822c606d119729370dbf581931c5f43ac6d3fa03ab4ed85a10
+ARG GO_IMAGE=golang:1.26.4-alpine3.23
 FROM ${GO_IMAGE} AS build
 
 WORKDIR /src
