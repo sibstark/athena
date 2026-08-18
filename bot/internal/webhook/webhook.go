@@ -52,8 +52,8 @@ func CreateWebhookHandler(options Options) func(req *http.Request) (statusCode i
 		if req.Method != http.MethodPost {
 			return http.StatusMethodNotAllowed, "405 Not Allowed"
 		}
-		logger.WarnContext(req.Context(), "Hook is working")
 		event, err := Parse(req)
+		logger.WarnContext(req.Context(), "Hook parsed", "event", event)
 		if err != nil {
 			logger.WarnContext(req.Context(), "invalid webhook payload", "error", err)
 			return http.StatusBadRequest, "400 Bad request"
