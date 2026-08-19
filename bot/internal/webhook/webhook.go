@@ -27,6 +27,7 @@ type Options struct {
 }
 
 type BitrixEventMessage struct {
+	Id       int    `json:"id"`
 	Text     string `json:"text"`
 	IsSystem bool   `json:"isSystem"`
 	AuthorId int    `json:"authorId"`
@@ -44,9 +45,6 @@ var defaultFallbackMessage = "Извините, сейчас не удалось
 
 func CreateWebhookHandler(options Options) func(req *http.Request) (statusCode int, status string) {
 	logger := options.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
 
 	return func(req *http.Request) (statusCode int, status string) {
 		if req.Method != http.MethodPost {
@@ -69,38 +67,41 @@ func CreateWebhookHandler(options Options) func(req *http.Request) (statusCode i
 			return http.StatusOK, "200 Success"
 		}
 
-		go func(dialogId string, message string) {
-			startedAt := time.Now()
-			parent := options.Options.Context
-			if parent == nil {
-				parent = context.Background()
-			}
-
-			ctx, cancel := context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
-			answer, err := options.Api.Answer(ctx, message)
-			cancel()
-			if err != nil {
-				logger.ErrorContext(parent, "answer request failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
-				answer = defaultFallbackMessage
-			}
-
-			ctx, cancel = context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
-			err = options.Bitrix.Send(ctx, dialogId, answer)
-			cancel()
-			if err != nil {
-				logger.ErrorContext(parent, "Bitrix message send failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
-				return
-			}
-			logger.InfoContext(
-				parent,
-				"webhook message processed",
-				"dialog_id", dialogId,
-				"duration_ms", time.Since(startedAt).Milliseconds(),
-			)
-		}(event.Chat.DialogId, event.Message.Text)
+		go reply(options, event.Message.Id, event.Chat.DialogId, event.Message.Text)
 
 		return http.StatusOK, "200 Success"
 	}
+}
+
+func reply(options Options, messageId int, dialogId string, message string) {
+	logger := options.Logger
+	startedAt := time.Now()
+	parent := options.Options.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+
+	ctx, cancel := context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
+	answer, err := options.Api.Answer(ctx, message)
+	cancel()
+	if err != nil {
+		logger.ErrorContext(parent, "answer request failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
+		answer = defaultFallbackMessage
+	}
+
+	ctx, cancel = context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
+	err = options.Bitrix.SendReply(ctx, messageId, dialogId, answer)
+	cancel()
+	if err != nil {
+		logger.ErrorContext(parent, "Bitrix message send failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
+		return
+	}
+	logger.InfoContext(
+		parent,
+		"webhook message processed",
+		"dialog_id", dialogId,
+		"duration_ms", time.Since(startedAt).Milliseconds(),
+	)
 }
 
 func safeErrorMessage(err error) string {

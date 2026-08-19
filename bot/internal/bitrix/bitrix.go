@@ -25,6 +25,7 @@ type BitrixClient struct {
 
 type bitrixMessage struct {
 	Message string `json:"message"`
+	ReplyId int    `json:"replyId"`
 }
 
 type bitrixRequest struct {
@@ -50,12 +51,12 @@ func New(webhook string, options Options) (*BitrixClient, error) {
 	return &bc, nil
 }
 
-func (c *BitrixClient) Send(ctx context.Context, dialogId string, message string) error {
+func (c *BitrixClient) SendReply(ctx context.Context, replyId int, dialogId string, message string) error {
 	body, err := json.Marshal(bitrixRequest{
 		BotId:    c.botId,
 		BotToken: c.botToken,
 		DialogId: dialogId,
-		Fields:   bitrixMessage{Message: message},
+		Fields:   bitrixMessage{Message: message, ReplyId: replyId},
 	})
 	if err != nil {
 		return err

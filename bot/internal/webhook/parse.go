@@ -106,6 +106,13 @@ func Parse(req *http.Request) (BitrixEvent, error) {
 		value(params, "authorId"),
 		value(params, "FROM_USER_ID"),
 	)
+	messageID, hasMessageID := numberValue(
+		value(message, "id"),
+		value(message, "messageId"),
+		value(message, "MESSAGE_ID"),
+		value(params, "messageId"),
+		value(params, "MESSAGE_ID"),
+	)
 	dialogID, hasDialogID := stringValue(
 		value(chat, "dialogId"),
 		value(chat, "dialog_id"),
@@ -123,7 +130,7 @@ func Parse(req *http.Request) (BitrixEvent, error) {
 		value(params, "BOT_ID"),
 	)
 
-	if !hasEvent || !hasApplicationToken || !hasText || !hasAuthorID || !hasDialogID || !hasBotID {
+	if !hasMessageID || !hasEvent || !hasApplicationToken || !hasText || !hasAuthorID || !hasDialogID || !hasBotID {
 		return BitrixEvent{}, errMissingRequiredField
 	}
 
@@ -131,6 +138,7 @@ func Parse(req *http.Request) (BitrixEvent, error) {
 		Event:            event,
 		ApplicationToken: applicationToken,
 		Message: BitrixEventMessage{
+			Id:       messageID,
 			Text:     text,
 			AuthorId: authorID,
 			IsSystem: booleanValue(firstValue(

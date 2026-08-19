@@ -34,7 +34,7 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
-func TestSend(t *testing.T) {
+func TestSendReply(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("Expected POST method, got %s", r.Method)
@@ -62,6 +62,9 @@ func TestSend(t *testing.T) {
 		if req.Fields.Message != "test message" {
 			t.Errorf("Expected message test message, got %s", req.Fields.Message)
 		}
+		if req.Fields.ReplyId != 789 {
+			t.Errorf("Expected replyId 789, got %d", req.Fields.ReplyId)
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"result":true}`))
@@ -75,7 +78,7 @@ func TestSend(t *testing.T) {
 		httpClient: server.Client(),
 	}
 
-	if err := client.Send(context.Background(), "chat123", "test message"); err != nil {
+	if err := client.SendReply(context.Background(), 789, "chat123", "test message"); err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 }
@@ -102,7 +105,7 @@ func TestWrongHTTPStatusCode(t *testing.T) {
 				httpClient: server.Client(),
 			}
 
-			err := client.Send(context.Background(), "chat123", "test message")
+			err := client.SendReply(context.Background(), 789, "chat123", "test message")
 			if err == nil {
 				t.Fatal("Expected error")
 			}
@@ -125,7 +128,7 @@ func TestInvalidJSONResponse(t *testing.T) {
 		httpClient: server.Client(),
 	}
 
-	err := client.Send(context.Background(), "chat123", "test message")
+	err := client.SendReply(context.Background(), 789, "chat123", "test message")
 	if err == nil {
 		t.Fatal("Expected invalid JSON error")
 	}

@@ -14,7 +14,7 @@ func TestParseJSONEvent(t *testing.T) {
 		"event":"ONIMBOTV2MESSAGEADD",
 		"auth":{"application_token":"app-secret"},
 		"data":{
-			"message":{"text":"Что такое ментальная арифметика?","authorId":42},
+			"message":{"id":789,"text":"Что такое ментальная арифметика?","authorId":42},
 			"chat":{"dialogId":"chat17"},
 			"bot":{"id":7}
 		}
@@ -32,6 +32,9 @@ func TestParseJSONEvent(t *testing.T) {
 	}
 	if event.ApplicationToken != "app-secret" {
 		t.Errorf("ApplicationToken = %q", event.ApplicationToken)
+	}
+	if event.Message.Id != 789 {
+		t.Errorf("Message.Id = %d", event.Message.Id)
 	}
 	if event.Message.Text != "Что такое ментальная арифметика?" {
 		t.Errorf("Message.Text = %q", event.Message.Text)
@@ -54,6 +57,7 @@ func TestParseNestedFormEvent(t *testing.T) {
 	form := url.Values{
 		"event":                   {"ONIMBOTV2MESSAGEADD"},
 		"auth[application_token]": {"app-secret"},
+		"message[id]":             {"789"},
 		"message[text]":           {"Привет"},
 		"message[authorId]":       {"42"},
 		"message[isSystem]":       {"N"},
@@ -71,6 +75,9 @@ func TestParseNestedFormEvent(t *testing.T) {
 	if event.Message.Text != "Привет" {
 		t.Errorf("Message.Text = %q", event.Message.Text)
 	}
+	if event.Message.Id != 789 {
+		t.Errorf("Message.Id = %d", event.Message.Id)
+	}
 	if event.Message.AuthorId != 42 {
 		t.Errorf("Message.AuthorId = %d", event.Message.AuthorId)
 	}
@@ -83,7 +90,7 @@ func TestParseNestedFormEvent(t *testing.T) {
 }
 
 func TestParsePayloadSizeLimit(t *testing.T) {
-	base := `{"event":"ONIMBOTV2MESSAGEADD","auth":{"application_token":"token"},"message":{"text":"text","authorId":1},"chat":{"dialogId":"chat"},"bot":{"id":2},"padding":""}`
+	base := `{"event":"ONIMBOTV2MESSAGEADD","auth":{"application_token":"token"},"message":{"id":3,"text":"text","authorId":1},"chat":{"dialogId":"chat"},"bot":{"id":2},"padding":""}`
 	exactBody := base[:len(base)-2] + strings.Repeat("a", int(maxBodySize)-len(base)) + `"}`
 	if int64(len(exactBody)) != maxBodySize {
 		t.Fatalf("test body size = %d", len(exactBody))
@@ -134,6 +141,7 @@ func TestParseAlternativeFieldsAndValues(t *testing.T) {
 				"EVENT":" ONIMBOTV2MESSAGEADD ",
 				"AUTH":{"APPLICATION_TOKEN":" token "},
 				"DATA":{"PARAMS":{
+					"MESSAGE_ID":"789",
 					"MESSAGE":" hello ",
 					"FROM_USER_ID":"42",
 					"DIALOG_ID":17,
@@ -150,7 +158,7 @@ func TestParseAlternativeFieldsAndValues(t *testing.T) {
 			if event.Event != "ONIMBOTV2MESSAGEADD" || event.ApplicationToken != "token" || event.Message.Text != "hello" {
 				t.Fatalf("unexpected normalized event: %+v", event)
 			}
-			if event.Message.AuthorId != 42 || event.Chat.DialogId != "17" || event.Bot.Id != 7 {
+			if event.Message.Id != 789 || event.Message.AuthorId != 42 || event.Chat.DialogId != "17" || event.Bot.Id != 7 {
 				t.Fatalf("unexpected normalized IDs: %+v", event)
 			}
 			if !event.Message.IsSystem {
