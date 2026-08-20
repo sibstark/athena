@@ -1,0 +1,4 @@
+.env
+/fetcher
+coverage.out
+*.log

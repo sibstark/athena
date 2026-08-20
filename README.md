@@ -3,7 +3,7 @@
 Репозиторий состоит из независимых проектов и общей инфраструктуры данных:
 
 ```text
-puller/      Bitrix24 → Markdown
+fetcher/     Все БЗ Bitrix24 → immutable runs с manifest.json
 normalizer/  Markdown → normalized.jsonl + document_tree.json
 chunker/     normalized.jsonl → chunks.jsonl
 indexer/     chunks.jsonl → local E5 embeddings → Qdrant
@@ -17,7 +17,9 @@ var/qdrant/  данные Qdrant (не в Git)
 var/tei/     кеш модели TEI (не в Git)
 ```
 
-CLI не вызывают друг друга автоматически. В каждом каталоге свой `package.json`, `bun.lock` и набор зависимостей. `puller` не содержит Docker Compose и кода Qdrant.
+CLI не вызывают друг друга автоматически. В каждом каталоге свой manifest зависимостей (`package.json`/`bun.lock` или `go.mod`/`go.sum`). `fetcher` не содержит Docker Compose и кода Qdrant.
+
+`fetcher` — отдельный Go-проект для полного снимка Базы знаний 2.0. Каждый запуск сохраняется в новом `run_<unix_ms>` и регистрируется в `runs.json`; старые запуски не перезаписываются. Текущие `normalizer`, `chunker` и `indexer` пока не запускаются им автоматически.
 
 Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
 
@@ -103,20 +105,11 @@ curl -I https://devgames.hwschool.online/healthz
 
 HTTP автоматически перенаправляется на HTTPS. Порты Qdrant, TEI и `rag-api` остаются привязаны только к `127.0.0.1`; не открывайте их в firewall. Для остановки только TLS-прокси используйте `bun run https:down`. Не удаляйте `var/nginx-le/ssl/`, если хотите сохранить выданные сертификаты.
 
-## Полный ручной workflow
+## Выгрузка Bitrix24
 
 ```bash
-cd puller
-bun run pull -- --collection 17 --out ../data/exports/mental-arithmetic
-
-cd ../normalizer
-bun run normalize -- --input ../data/exports/mental-arithmetic/content --output ../data/normalized/mental-arithmetic/normalized.jsonl --tree ../data/normalized/mental-arithmetic/document_tree.json --force
-
-cd ../chunker
-bun run chunk -- --input ../data/normalized/mental-arithmetic/normalized.jsonl --tree ../data/normalized/mental-arithmetic/document_tree.json --output ../data/normalized/mental-arithmetic/chunks.jsonl --force
-
-cd ../indexer
-bun run rag:index -- --input ../data/normalized/mental-arithmetic/chunks.jsonl --collection methodology_e5_small_v1
+cd fetcher
+go run ./cmd/fetcher fetch --out ../data/exports/bitrix
 ```
 
-Установка и тесты выполняются отдельно в каждом проекте: `bun install`, `bun test`, `bun run typecheck`.
+Каждый запуск создаёт отдельный каталог `run_<unix_ms>`. Подключение его workspace-выгрузок к `normalizer`, `chunker` и `indexer` выполняется отдельно.

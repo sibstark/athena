@@ -11,3 +11,4 @@ reports/
 rag-api/server
 rag-api/coverage.out
 .vscode/
+bot.json

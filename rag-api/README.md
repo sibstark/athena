@@ -1,6 +1,6 @@
 # Athena RAG API
 
-Отдельный stateless Go-сервис объединяет существующие Rust TEI и Qdrant с внешним DeepSeek Chat Completions API. Сервис не записывает данные в Qdrant и не запускает puller, normalizer, chunker или indexer. Он не знает о Bitrix, ролях и вызывающих приложениях: клиент сам передаёт коллекции, в которых нужно искать.
+Отдельный stateless Go-сервис объединяет существующие Rust TEI и Qdrant с внешним DeepSeek Chat Completions API. Сервис не записывает данные в Qdrant и не запускает fetcher, normalizer, chunker или indexer. Он не знает о Bitrix, ролях и вызывающих приложениях: клиент сам передаёт коллекции, в которых нужно искать.
 
 ```text
 POST /v1/search → TEI query embedding → Qdrant read-only search
