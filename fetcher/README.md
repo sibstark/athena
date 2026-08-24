@@ -79,6 +79,60 @@ Important API constraints:
 - `note.document.search.list` requires a search phrase and cannot enumerate a complete workspace.
 - Tests against this portal confirmed that legacy `batch` reports `note.*` as unknown and REST 3.0 does not expose `rest.batch`. Fetcher therefore uses individual document requests with bounded concurrency and retry/backoff.
 
+## Normalization
+
+The Go normalizer is a separate command inside this project. It reads a finalized immutable `run_*` through its `manifest.json` and writes derived data to a different directory; source runs are never modified.
+
+Normalize every workspace:
+
+```bash
+go run ./cmd/fetcher normalize \
+  --run ../data/fetcher/run_1787220682160 \
+  --out ../data/normalized/run_1787220682160
+```
+
+Normalize selected workspaces and atomically replace an existing result:
+
+```bash
+go run ./cmd/fetcher normalize \
+  --run ../data/fetcher/run_1787220682160 \
+  --out ../data/normalized/run_1787220682160 \
+  --include 17,27 \
+  --short-note-threshold 200 \
+  --force
+```
+
+`--include` and `--exclude` have the same repeatable, comma-separated semantics as `fetch`. The output directory must not contain the source run or be located inside it.
+
+```text
+data/normalized/run_1787220682160/
+├── normalization_manifest.json
+├── normalization_report.json
+├── workspace_17/
+│   ├── normalized.jsonl
+│   ├── document_tree.json
+│   └── normalization_report.json
+└── workspace_27/
+    └── ...
+```
+
+The source manifest, rather than directory names, is authoritative for Bitrix IDs, parents, ordering, paths, and Qdrant collection names. `normalized.jsonl` and `document_tree.json` retain the contract consumed by the existing `chunker`. Additional metadata contains Bitrix timestamps/URLs and `suspicious` diagnostics.
+
+Normalization preserves partial results. Invalid documents are skipped and recorded in the workspace report; an invalid workspace does not block other workspaces. Such a result has `complete_with_warnings` and a successful exit status. Global source/output errors and a run where no selected workspace can be processed return a non-zero exit status.
+
+Suspicious-content heuristics report missing TOC sections, terminal headings or empty list markers, unclosed code fences, and empty/very short leaf documents. They do not change `indexable`, because these checks can have false positives. Integrity diagnostics also cover Front Matter mismatches, missing local assets, broken internal document links, and invalid trees.
+
+Pass one workspace to the chunker:
+
+```bash
+cd ../chunker
+bun run chunk -- \
+  --input ../data/normalized/run_1787220682160/workspace_17/normalized.jsonl \
+  --tree ../data/normalized/run_1787220682160/workspace_17/document_tree.json \
+  --output ../data/normalized/run_1787220682160/workspace_17/chunks.jsonl \
+  --force
+```
+
 ## Verification
 
 ```bash

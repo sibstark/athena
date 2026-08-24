@@ -15,6 +15,7 @@ import (
 
 	"github.com/sibstark/athena/fetcher/internal/bitrix"
 	"github.com/sibstark/athena/fetcher/internal/config"
+	"github.com/sibstark/athena/fetcher/internal/normalizer"
 	"github.com/sibstark/athena/fetcher/internal/snapshot"
 )
 
@@ -72,10 +73,50 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return writer.Flush()
 	case "fetch":
 		return runFetch(ctx, args[1:], stdout, stderr)
+	case "normalize":
+		return runNormalize(args[1:], stdout, stderr)
 	default:
 		printUsage(stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runNormalize(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("normalize", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var runDirectory string
+	var output string
+	var include idSet
+	var exclude idSet
+	var shortNoteThreshold int
+	var force bool
+	flags.StringVar(&runDirectory, "run", "", "finalized fetcher run directory (required)")
+	flags.StringVar(&output, "out", "", "separate output directory for normalized data (required)")
+	flags.Var(&include, "include", "workspace IDs to include; comma-separated or repeated")
+	flags.Var(&exclude, "exclude", "workspace IDs to exclude; comma-separated or repeated")
+	flags.IntVar(&shortNoteThreshold, "short-note-threshold", 200, "short note threshold in Unicode characters")
+	flags.BoolVar(&force, "force", false, "atomically replace an existing output directory")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	result, err := normalizer.Normalize(normalizer.Options{
+		RunDir: runDirectory, OutputDir: output, Include: include.values, Exclude: exclude.values,
+		ShortNoteThreshold: shortNoteThreshold, Force: force,
+		Progress: func(message string) { fmt.Fprintln(stdout, message) },
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "Status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "Workspaces: %d\n", result.WorkspaceCount)
+	fmt.Fprintf(stdout, "Documents: %d normalized, %d suspicious\n", result.ProcessedDocuments, result.SuspiciousDocuments)
+	fmt.Fprintf(stdout, "Diagnostics: %d errors, %d warnings\n", result.Errors, result.Warnings)
+	fmt.Fprintf(stdout, "Output: %s\n", result.OutputDir)
+	return nil
 }
 
 func runFetch(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -163,4 +204,5 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  fetcher auth check")
 	fmt.Fprintln(writer, "  fetcher workspaces list")
 	fmt.Fprintln(writer, "  fetcher fetch --out <directory> [--include IDs] [--exclude IDs] [--skip-assets]")
+	fmt.Fprintln(writer, "  fetcher normalize --run <run_directory> --out <directory> [--include IDs] [--exclude IDs] [--short-note-threshold N] [--force]")
 }

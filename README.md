@@ -3,8 +3,7 @@
 Репозиторий состоит из независимых проектов и общей инфраструктуры данных:
 
 ```text
-fetcher/     Все БЗ Bitrix24 → immutable runs с manifest.json
-normalizer/  Markdown → normalized.jsonl + document_tree.json
+fetcher/     Все БЗ Bitrix24 → immutable runs; Go normalizer → данные по workspace
 chunker/     normalized.jsonl → chunks.jsonl
 indexer/     chunks.jsonl → local E5 embeddings → Qdrant
 tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
@@ -19,7 +18,7 @@ var/tei/     кеш модели TEI (не в Git)
 
 CLI не вызывают друг друга автоматически. В каждом каталоге свой manifest зависимостей (`package.json`/`bun.lock` или `go.mod`/`go.sum`). `fetcher` не содержит Docker Compose и кода Qdrant.
 
-`fetcher` — отдельный Go-проект для полного снимка Базы знаний 2.0. Каждый запуск сохраняется в новом `run_<unix_ms>` и регистрируется в `runs.json`; старые запуски не перезаписываются. Текущие `normalizer`, `chunker` и `indexer` пока не запускаются им автоматически.
+`fetcher` — отдельный Go-проект для полного снимка Базы знаний 2.0. Каждый запуск сохраняется в новом `run_<unix_ms>` и регистрируется в `runs.json`; старые запуски не перезаписываются. Встроенная отдельная команда `fetcher normalize` преобразует выбранный завершённый run в per-workspace `normalized.jsonl` и `document_tree.json`, не меняя snapshot. `chunker` и `indexer` по-прежнему запускаются отдельно.
 
 Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
 
@@ -112,4 +111,13 @@ cd fetcher
 go run ./cmd/fetcher fetch --out ../data/exports/bitrix
 ```
 
-Каждый запуск создаёт отдельный каталог `run_<unix_ms>`. Подключение его workspace-выгрузок к `normalizer`, `chunker` и `indexer` выполняется отдельно.
+Каждый запуск создаёт отдельный каталог `run_<unix_ms>`. Для нормализации завершённого snapshot используйте отдельный выходной каталог:
+
+```bash
+cd fetcher
+go run ./cmd/fetcher normalize \
+  --run ../data/fetcher/run_<unix_ms> \
+  --out ../data/normalized/run_<unix_ms>
+```
+
+После этого `chunker` и `indexer` запускаются отдельно для каждого `workspace_<id>`.
