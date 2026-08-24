@@ -3,9 +3,8 @@
 Репозиторий состоит из независимых проектов и общей инфраструктуры данных:
 
 ```text
-fetcher/     Все БЗ Bitrix24 → immutable runs; Go normalizer → данные по workspace
+fetcher/     Все БЗ Bitrix24 → immutable runs; Go normalizer и indexer
 chunker/     normalized.jsonl → chunks.jsonl
-indexer/     chunks.jsonl → local E5 embeddings → Qdrant
 tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
 rag-api/     Go HTTP API → TEI + read-only Qdrant + DeepSeek
 web/         React chat UI → same-origin nginx proxy → rag-api
@@ -16,9 +15,9 @@ var/qdrant/  данные Qdrant (не в Git)
 var/tei/     кеш модели TEI (не в Git)
 ```
 
-CLI не вызывают друг друга автоматически. В каждом каталоге свой manifest зависимостей (`package.json`/`bun.lock` или `go.mod`/`go.sum`). `fetcher` не содержит Docker Compose и кода Qdrant.
+CLI не вызывают внешние сервисы автоматически. В каждом каталоге свой manifest зависимостей (`package.json`/`bun.lock` или `go.mod`/`go.sum`). Общие Qdrant и TEI запускаются корневым Docker Compose.
 
-`fetcher` — отдельный Go-проект для полного снимка Базы знаний 2.0. Каждый запуск сохраняется в новом `run_<unix_ms>` и регистрируется в `runs.json`; старые запуски не перезаписываются. Встроенная отдельная команда `fetcher normalize` преобразует выбранный завершённый run в per-workspace `normalized.jsonl` и `document_tree.json`, не меняя snapshot. `chunker` и `indexer` по-прежнему запускаются отдельно.
+`fetcher` — отдельный Go-проект для полного снимка Базы знаний 2.0. Каждый запуск сохраняется в новом `run_<unix_ms>` и регистрируется в `runs.json`; старые запуски не перезаписываются. Команда `fetcher normalize` преобразует завершённый run в per-workspace `normalized.jsonl` и `document_tree.json`, не меняя snapshot. После отдельного запуска `chunker` команда `fetcher index` синхронизирует готовые chunks с Qdrant через внешний TEI.
 
 Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
 
@@ -120,4 +119,4 @@ go run ./cmd/fetcher normalize \
   --out ../data/normalized/run_<unix_ms>
 ```
 
-После этого `chunker` и `indexer` запускаются отдельно для каждого `workspace_<id>`.
+После этого `chunker` запускается отдельно для каждого `workspace_<id>`, а `fetcher index --run ../data/normalized/run_<unix_ms>` одним запуском синхронизирует все объявленные в `normalization_manifest.json` коллекции с Qdrant и удаляет устаревшие точки внутри успешно обработанных коллекций.

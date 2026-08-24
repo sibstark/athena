@@ -133,6 +133,31 @@ bun run chunk -- \
   --force
 ```
 
+После создания `chunks.jsonl` для всех выбранных workspace синхронизируйте весь run с Qdrant одной командой:
+
+```bash
+cd ../fetcher
+go run ./cmd/fetcher index \
+  --run ../data/normalized/run_1787220682160
+```
+
+Go-indexer использует `qdrantCollection` из `normalization_manifest.json` и автоматически удаляет устаревшие точки только после успешной обработки соответствующего workspace. Workspace обрабатываются последовательно; ошибка одного не блокирует остальные, но итоговая команда возвращает ненулевой код.
+
+Для одной коллекции доступен отдельный режим:
+
+```bash
+go run ./cmd/fetcher index \
+  --input ../data/normalized/accounting/chunks.jsonl \
+  --collection accounting_e5_small_v1 \
+  --prune
+```
+
+Перед любой записью indexer проверяет `/health` и `/info` внешнего TEI, точные model ID/revision и запрет truncation. Qdrant и TEI команда не запускает. Настройки читаются из `TEI_URL`, `TEI_TIMEOUT`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_TIMEOUT`, `QDRANT_COLLECTION`, `INDEXER_BATCH_SIZE`, `EMBEDDING_PIPELINE_VERSION`, `EMBEDDING_VECTOR_CACHE_SIZE`, `STORE_EMBEDDING_TEXT` и `LOG_LEVEL`.
+
+Payload новых точек содержит `embedding_backend: "tei"`. Существующие точки Transformers.js без этого поля автоматически вычисляются заново; их vectors не используются как кеш. UUID точек и остальные параметры embedding pipeline остаются совместимыми.
+
+Полезные режимы: `--dry-run`, `--force-reembed`, `--continue-on-error`; `--prune` применяется вручную только с `--input`, а с `--run` всегда включён безопасно.
+
 ## Verification
 
 ```bash

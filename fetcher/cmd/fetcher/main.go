@@ -8,13 +8,16 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/sibstark/athena/fetcher/internal/bitrix"
 	"github.com/sibstark/athena/fetcher/internal/config"
+	"github.com/sibstark/athena/fetcher/internal/indexer"
 	"github.com/sibstark/athena/fetcher/internal/normalizer"
 	"github.com/sibstark/athena/fetcher/internal/snapshot"
 )
@@ -75,10 +78,177 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runFetch(ctx, args[1:], stdout, stderr)
 	case "normalize":
 		return runNormalize(args[1:], stdout, stderr)
+	case "index":
+		return runIndex(ctx, args[1:], stdout, stderr)
 	default:
 		printUsage(stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if err := config.LoadEnvironment(); err != nil {
+		return err
+	}
+	batchDefault, err := envPositiveInt("INDEXER_BATCH_SIZE", 16)
+	if err != nil {
+		return err
+	}
+	cacheDefault, err := envPositiveInt("EMBEDDING_VECTOR_CACHE_SIZE", 256)
+	if err != nil {
+		return err
+	}
+	qdrantTimeoutDefault, err := envDuration("QDRANT_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return err
+	}
+	teiTimeoutDefault, err := envDuration("TEI_TIMEOUT", 120*time.Second)
+	if err != nil {
+		return err
+	}
+	storeEmbeddingText, err := envBool("STORE_EMBEDDING_TEXT", false)
+	if err != nil {
+		return err
+	}
+	flags := flag.NewFlagSet("index", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	var runDirectory, input, collection, reportFile, qdrantURL, teiURL, logLevel string
+	var qdrantTimeout, teiTimeout time.Duration
+	var batchSize int
+	var dryRun, forceReembed, prune, continueOnError bool
+	flags.StringVar(&runDirectory, "run", "", "normalized run directory")
+	flags.StringVar(&input, "input", "", "single chunks.jsonl file")
+	flags.StringVar(&collection, "collection", envString("QDRANT_COLLECTION", indexer.DefaultCollection), "Qdrant collection for single-file mode")
+	flags.StringVar(&reportFile, "report", "", "output report path")
+	flags.StringVar(&qdrantURL, "qdrant-url", envString("QDRANT_URL", "http://127.0.0.1:6333"), "Qdrant base URL")
+	flags.StringVar(&teiURL, "tei-url", envString("TEI_URL", "http://127.0.0.1:8080"), "TEI base URL")
+	flags.DurationVar(&qdrantTimeout, "qdrant-timeout", qdrantTimeoutDefault, "Qdrant HTTP timeout")
+	flags.DurationVar(&teiTimeout, "tei-timeout", teiTimeoutDefault, "TEI HTTP timeout")
+	flags.IntVar(&batchSize, "batch-size", batchDefault, "JSONL processing batch size")
+	flags.BoolVar(&dryRun, "dry-run", false, "inspect changes without writing Qdrant")
+	flags.BoolVar(&forceReembed, "force-reembed", false, "recalculate every embedding")
+	flags.BoolVar(&prune, "prune", false, "delete managed points absent from a single input")
+	flags.BoolVar(&continueOnError, "continue-on-error", false, "continue after a failed batch")
+	flags.StringVar(&logLevel, "log-level", envString("LOG_LEVEL", "info"), "error, warn, info, or debug")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	if (runDirectory == "") == (input == "") {
+		return errors.New("exactly one of --run or --input is required")
+	}
+	if batchSize <= 0 {
+		return errors.New("--batch-size must be a positive integer")
+	}
+	if qdrantTimeout <= 0 || teiTimeout <= 0 {
+		return errors.New("--qdrant-timeout and --tei-timeout must be positive")
+	}
+	if input != "" && strings.TrimSpace(collection) == "" {
+		return errors.New("--collection must be non-empty in single-file mode")
+	}
+	if !validLogLevel(logLevel) {
+		return fmt.Errorf("unknown log level %q", logLevel)
+	}
+	pipelineVersion := envString("EMBEDDING_PIPELINE_VERSION", indexer.DefaultPipeline)
+	vectorCacheSize := cacheDefault
+	common := indexer.RunConfig{
+		QdrantURL: qdrantURL, QdrantAPIKey: strings.TrimSpace(os.Getenv("QDRANT_API_KEY")), QdrantTimeout: qdrantTimeout,
+		TEIURL: teiURL, TEITimeout: teiTimeout, BatchSize: batchSize, PipelineVersion: pipelineVersion,
+		VectorCacheSize: vectorCacheSize, StoreEmbeddingText: storeEmbeddingText, DryRun: dryRun,
+		ForceReembed: forceReembed, ContinueOnError: continueOnError, LogLevel: logLevel,
+		Progress: func(message string) { fmt.Fprintln(stdout, message) },
+	}
+	if runDirectory != "" {
+		if prune {
+			return errors.New("--prune is automatic in --run mode; omit the flag")
+		}
+		common.RunDir = runDirectory
+		common.ReportFile = reportFile
+		result, err := indexer.IndexRun(ctx, common, indexer.Dependencies{})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Status: %s\nWorkspaces: %d complete, %d failed, %d skipped\nReport: %s\n", result.Status, result.SuccessfulWorkspaces, result.FailedWorkspaces, result.SkippedWorkspaces, reportPath(reportFile, runDirectory, "index-report.json"))
+		if result.Status != "complete" {
+			return fmt.Errorf("index run finished with status %s", result.Status)
+		}
+		return nil
+	}
+	result, err := indexer.Index(ctx, indexer.Config{
+		InputFile: input, ReportFile: reportFile, Collection: collection,
+		QdrantURL: common.QdrantURL, QdrantAPIKey: common.QdrantAPIKey, QdrantTimeout: common.QdrantTimeout,
+		TEIURL: common.TEIURL, TEITimeout: common.TEITimeout, BatchSize: common.BatchSize,
+		PipelineVersion: common.PipelineVersion, VectorCacheSize: common.VectorCacheSize,
+		StoreEmbeddingText: common.StoreEmbeddingText, DryRun: common.DryRun, ForceReembed: common.ForceReembed,
+		Prune: prune, ContinueOnError: common.ContinueOnError, LogLevel: common.LogLevel,
+	}, indexer.Dependencies{})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Indexed: %d embedded, %d payload-only, %d unchanged, %d deleted, %d failed\n", result.EmbeddedChunks, result.PayloadOnlyUpdates, result.SkippedUnchanged, result.DeletedChunks, result.FailedChunks)
+	if result.FailedChunks > 0 || len(result.Errors) > 0 {
+		return errors.New("indexing finished with errors; see the index report")
+	}
+	return nil
+}
+
+func envString(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}
+func envPositiveInt(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", name, value)
+	}
+	return parsed, nil
+}
+func envDuration(name string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	if parsed, err := time.ParseDuration(value); err == nil {
+		if parsed <= 0 {
+			return 0, fmt.Errorf("%s must be positive, got %q", name, value)
+		}
+		return parsed, nil
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second, nil
+	}
+	return 0, fmt.Errorf("%s must be a positive duration, got %q", name, value)
+}
+func envBool(name string, fallback bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "yes":
+		return true, nil
+	case "0", "false", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be a boolean, got %q", name, value)
+	}
+}
+func validLogLevel(value string) bool {
+	return value == "error" || value == "warn" || value == "info" || value == "debug"
+}
+func reportPath(explicit, root, fallback string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return filepath.Join(root, fallback)
 }
 
 func runNormalize(args []string, stdout, stderr io.Writer) error {
@@ -205,4 +375,6 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  fetcher workspaces list")
 	fmt.Fprintln(writer, "  fetcher fetch --out <directory> [--include IDs] [--exclude IDs] [--skip-assets]")
 	fmt.Fprintln(writer, "  fetcher normalize --run <run_directory> --out <directory> [--include IDs] [--exclude IDs] [--short-note-threshold N] [--force]")
+	fmt.Fprintln(writer, "  fetcher index --run <normalized_run> [--dry-run] [--force-reembed] [--continue-on-error]")
+	fmt.Fprintln(writer, "  fetcher index --input <chunks.jsonl> --collection <name> [--prune] [--dry-run]")
 }

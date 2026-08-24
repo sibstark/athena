@@ -120,11 +120,11 @@ it_docs_e5_small_v1
 salary_e5_small_v1
 ```
 
-Текущий indexer уже поддерживает отдельный запуск:
+Go-indexer в `fetcher` поддерживает отдельный запуск:
 
 ```bash
-cd indexer
-bun run rag:index -- \
+cd fetcher
+go run ./cmd/fetcher index \
   --input ../data/normalized/accounting/chunks.jsonl \
   --collection accounting_e5_small_v1
 ```
