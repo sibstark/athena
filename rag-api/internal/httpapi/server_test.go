@@ -63,6 +63,19 @@ type readyStub struct{ err error }
 
 func (r readyStub) Ready(context.Context) error { return r.err }
 
+type qdrantStub struct {
+	readyErr    error
+	listErr     error
+	collections []string
+	listCalls   atomic.Int32
+}
+
+func (q *qdrantStub) Ready(context.Context) error { return q.readyErr }
+func (q *qdrantStub) ListCollections(context.Context) ([]string, error) {
+	q.listCalls.Add(1)
+	return append([]string(nil), q.collections...), q.listErr
+}
+
 func TestSearchRequiresAuthAndNeverCallsGenerator(t *testing.T) {
 	retriever := &fakeRetriever{results: sampleResults()}
 	generator := &fakeGenerator{}
@@ -96,6 +109,66 @@ func TestHealthMetricsAndAuthEndpointsDoNotRequireBearer(t *testing.T) {
 	handler.ServeHTTP(sessionResponse, sessionRequest)
 	if sessionResponse.Code != http.StatusUnauthorized || strings.Contains(sessionResponse.Body.String(), "Bearer") {
 		t.Fatalf("session status=%d body=%s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
+func TestCollectionsRequiresAuthAndReturnsNamesWithoutUsingSearchOrGenerator(t *testing.T) {
+	retriever := &fakeRetriever{}
+	generator := &fakeGenerator{}
+	server := testServer(retriever, generator)
+	qdrant := &qdrantStub{collections: []string{"workspace_1", "workspace_7"}}
+	server.qdrant = qdrant
+
+	unauthorized := httptest.NewRequest(http.MethodGet, "/v1/collections", nil)
+	unauthorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthorizedResponse, unauthorized)
+	if unauthorizedResponse.Code != http.StatusUnauthorized || qdrant.listCalls.Load() != 0 {
+		t.Fatalf("status=%d calls=%d", unauthorizedResponse.Code, qdrant.listCalls.Load())
+	}
+
+	authorized := httptest.NewRequest(http.MethodGet, "/v1/collections", nil)
+	authorized.Header.Set("Authorization", "Bearer key")
+	authorizedResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(authorizedResponse, authorized)
+	if authorizedResponse.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", authorizedResponse.Code, authorizedResponse.Body.String())
+	}
+	var response models.CollectionsResponse
+	if err := json.NewDecoder(authorizedResponse.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.RequestID == "" || len(response.Collections) != 2 || response.Collections[0] != "workspace_1" || response.Collections[1] != "workspace_7" {
+		t.Fatalf("response=%+v", response)
+	}
+	if retriever.calls.Load() != 0 || generator.calls.Load() != 0 || qdrant.listCalls.Load() != 1 {
+		t.Fatalf("retriever=%d generator=%d qdrant=%d", retriever.calls.Load(), generator.calls.Load(), qdrant.listCalls.Load())
+	}
+}
+
+func TestCollectionsAcceptsSessionCookie(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	qdrant := &qdrantStub{collections: []string{}}
+	server.qdrant = qdrant
+	login := loginRequest(server.Handler(), "admin", "password", "192.0.2.20:1234")
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/collections", nil)
+	request.AddCookie(login.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"collections":[]`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestCollectionsMapsQdrantFailureToServiceUnavailable(t *testing.T) {
+	server := testServer(&fakeRetriever{}, &fakeGenerator{})
+	server.qdrant = &qdrantStub{listErr: models.ErrQdrantUnavailable}
+	request := httptest.NewRequest(http.MethodGet, "/v1/collections", nil)
+	request.Header.Set("Authorization", "Bearer key")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"qdrant_unavailable"`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 
@@ -316,7 +389,7 @@ func testServer(retriever *fakeRetriever, generator *fakeGenerator) *Server {
 		panic(err)
 	}
 	cfg := config.Config{APIKey: "key", AuthUsername: "admin", AuthPasswordHash: string(hash), AuthSessionSecret: strings.Repeat("s", 32), AuthSessionTTL: 24 * time.Hour, AuthCookieSecure: true, HTTPMaxBodyBytes: 1 << 20, DefaultTopK: 8, MaxTopK: 20, ScoreThreshold: .65, MaxQueryChars: 4000, MaxContextChars: 30000, MaxContextChunks: 8, TEITimeout: time.Second, QdrantTimeout: time.Second}
-	return New(cfg, retriever, generator, readyStub{}, readyStub{}, observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return New(cfg, retriever, generator, readyStub{}, &qdrantStub{}, observability.NewMetrics(), slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func loginRequest(handler http.Handler, username, password, remoteAddr string) *httptest.ResponseRecorder {

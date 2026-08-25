@@ -3,6 +3,7 @@
 Отдельный stateless Go-сервис объединяет существующие Rust TEI и Qdrant с внешним DeepSeek Chat Completions API. Сервис не записывает данные в Qdrant и не запускает fetcher, normalizer, chunker или indexer. Он не знает о Bitrix, ролях и вызывающих приложениях: клиент сам передаёт коллекции, в которых нужно искать.
 
 ```text
+GET  /v1/collections → Qdrant read-only collection list
 POST /v1/search → TEI query embedding → Qdrant read-only search
 POST /v1/answer → тот же retrieval → ограниченный контекст → DeepSeek → проверка [S1]
 ```
@@ -121,6 +122,24 @@ curl -sS -b /tmp/athena-cookies.txt -X POST http://127.0.0.1:8090/v1/auth/logout
 ```
 
 После пяти неудачных входов с одного IP новые попытки блокируются на 15 минут; успешный вход очищает счётчик. Неверный логин и неверный пароль всегда возвращают одинаковую ошибку.
+
+## Коллекции Qdrant
+
+Защищённый метод возвращает отсортированный список всех коллекций Qdrant. Дополнительные запросы статистики к отдельным коллекциям не выполняются.
+
+```bash
+curl -sS http://127.0.0.1:8090/v1/collections \
+  -H "Authorization: Bearer ${RAG_API_KEY}"
+```
+
+```json
+{
+  "request_id": "8a4dd23d-9c88-44a6-9896-46829a01bc76",
+  "collections": ["workspace_1", "workspace_7", "workspace_41"]
+}
+```
+
+Пустой Qdrant возвращает `"collections": []`. Метод доступен также с действующей пользовательской session cookie, не вызывает TEI или DeepSeek и ничего не записывает в Qdrant.
 
 ## Поиск
 

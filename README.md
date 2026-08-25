@@ -129,4 +129,4 @@ cd ../fetcher
 go run ./cmd/fetcher index --run ../data/chunks/chunks_<unix_ms>
 ```
 
-Postfix на всех стадиях должен совпадать. Indexer читает `chunks_manifest.json`, синхронизирует все успешные workspace и удаляет отсутствующие точки внутри каждой такой коллекции.
+Postfix на всех стадиях должен совпадать. Indexer читает `chunks_manifest.json`, синхронизирует workspace со статусами `complete` и `complete_with_warnings` и удаляет отсутствующие точки внутри каждой такой коллекции. Ошибочные документы не блокируют остальные документы workspace, но остаются в диагностических отчётах и не попадают в Qdrant.

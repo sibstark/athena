@@ -2,6 +2,7 @@ package qdrant
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -10,6 +11,82 @@ import (
 
 	"github.com/sibstark/athena/rag-api/internal/models"
 )
+
+func TestListCollectionsUsesReadOnlyEndpointAndReturnsSortedUniqueNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/collections" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("api-key") != "secret" {
+			t.Error("missing API key")
+		}
+		json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{
+			map[string]any{"name": "workspace_7"},
+			map[string]any{"name": "workspace_1"},
+			map[string]any{"name": "workspace_7"},
+		}}})
+	}))
+	defer server.Close()
+
+	collections, err := New(server.URL, "secret", "default", time.Second, nil).ListCollections(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collections) != 2 || collections[0] != "workspace_1" || collections[1] != "workspace_7" {
+		t.Fatalf("collections=%v", collections)
+	}
+}
+
+func TestListCollectionsReturnsNonNilEmptySlice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{}}})
+	}))
+	defer server.Close()
+
+	collections, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collections == nil || len(collections) != 0 {
+		t.Fatalf("collections=%v", collections)
+	}
+}
+
+func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
+	t.Run("missing result", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			json.NewEncoder(w).Encode(map[string]any{"result": nil})
+		}))
+		defer server.Close()
+		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		if !errors.Is(err, models.ErrQdrantUnavailable) {
+			t.Fatalf("error=%v", err)
+		}
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{map[string]any{"name": " "}}}})
+		}))
+		defer server.Close()
+		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		if !errors.Is(err, models.ErrQdrantUnavailable) {
+			t.Fatalf("error=%v", err)
+		}
+	})
+
+	t.Run("http error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}))
+		defer server.Close()
+		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		if !errors.Is(err, models.ErrQdrantUnavailable) {
+			t.Fatalf("error=%v", err)
+		}
+	})
+}
 
 func TestSearchBuildsFlatPayloadFilters(t *testing.T) {
 	var body map[string]any

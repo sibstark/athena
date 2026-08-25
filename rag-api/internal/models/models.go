@@ -80,6 +80,11 @@ type SearchResponse struct {
 	Retrieval RetrievalInfo  `json:"retrieval"`
 }
 
+type CollectionsResponse struct {
+	RequestID   string   `json:"request_id"`
+	Collections []string `json:"collections"`
+}
+
 type AnswerSource struct {
 	SourceID     string   `json:"source_id"`
 	Collection   string   `json:"collection"`

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -53,6 +54,44 @@ func New(baseURL, apiKey, collection string, timeout time.Duration, observer Obs
 }
 
 func (c *Client) Collection() string { return c.collection }
+
+func (c *Client) ListCollections(ctx context.Context) ([]string, error) {
+	start := time.Now()
+	collections, err := c.listCollections(ctx)
+	c.notify(time.Since(start), err)
+	return collections, err
+}
+
+func (c *Client) listCollections(ctx context.Context) ([]string, error) {
+	var response struct {
+		Result *struct {
+			Collections []struct {
+				Name string `json:"name"`
+			} `json:"collections"`
+		} `json:"result"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/collections", nil, &response); err != nil {
+		return nil, fmt.Errorf("%w: %v", models.ErrQdrantUnavailable, err)
+	}
+	if response.Result == nil || response.Result.Collections == nil {
+		return nil, fmt.Errorf("%w: Qdrant response has no result.collections array", models.ErrQdrantUnavailable)
+	}
+	seen := make(map[string]struct{}, len(response.Result.Collections))
+	collections := make([]string, 0, len(response.Result.Collections))
+	for _, item := range response.Result.Collections {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			return nil, fmt.Errorf("%w: Qdrant returned an empty collection name", models.ErrQdrantUnavailable)
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		collections = append(collections, name)
+	}
+	sort.Strings(collections)
+	return collections, nil
+}
 
 func (c *Client) Ready(ctx context.Context) error {
 	start := time.Now()

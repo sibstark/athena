@@ -170,8 +170,8 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "Status: %s\nWorkspaces: %d complete, %d failed, %d skipped\nReport: %s\n", result.Status, result.SuccessfulWorkspaces, result.FailedWorkspaces, result.SkippedWorkspaces, reportPath(reportFile, runDirectory, "index-report.json"))
-		if result.Status != "complete" {
+		fmt.Fprintf(stdout, "Status: %s\nWorkspaces: %d successful (%d with warnings), %d failed, %d skipped\nReport: %s\n", result.Status, result.SuccessfulWorkspaces, result.WarningWorkspaces, result.FailedWorkspaces, result.SkippedWorkspaces, reportPath(reportFile, runDirectory, "index-report.json"))
+		if result.Status != "complete" && result.Status != "complete_with_warnings" {
 			return fmt.Errorf("index run finished with status %s", result.Status)
 		}
 		return nil

@@ -13,7 +13,7 @@ import {
   DEFAULT_TOKENIZER_SHA256,
 } from "./e5-token-counter.js";
 
-export const CHUNKS_MANIFEST_FORMAT_VERSION = 1;
+export const CHUNKS_MANIFEST_FORMAT_VERSION = 2;
 
 export interface ChunkRunOptions {
   runDir: string;
@@ -36,7 +36,7 @@ export interface ChunkWorkspaceManifest {
   sourceStatus: string;
   chunksPath?: string;
   reportPath: string;
-  status: "complete" | "failed";
+  status: "complete" | "complete_with_warnings" | "failed";
   processedDocuments: number;
   chunksCreated: number;
   errors: number;
@@ -55,7 +55,7 @@ export interface ChunksManifest {
 
 export interface ChunkRunReport {
   formatVersion: number;
-  status: "complete" | "complete_with_errors" | "failed";
+  status: "complete" | "complete_with_warnings" | "complete_with_errors" | "failed";
   sourceRun: string;
   sourceNormalization: string;
   startedAt: string;
@@ -63,6 +63,7 @@ export interface ChunkRunReport {
   durationMs: number;
   workspaceCount: number;
   successfulWorkspaces: number;
+  warningWorkspaces: number;
   failedWorkspaces: number;
   processedDocuments: number;
   chunksCreated: number;
@@ -150,9 +151,12 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
       workspaceResults.push(result);
     }
 
-    const successful = workspaceResults.filter((item) => item.status === "complete").length;
+    const warning = workspaceResults.filter((item) => item.status === "complete_with_warnings").length;
+    const successful = workspaceResults.filter((item) => item.status !== "failed").length;
     const failed = workspaceResults.length - successful;
-    const status = failed === 0 ? "complete" : successful === 0 ? "failed" : "complete_with_errors";
+    const status = failed > 0
+      ? successful === 0 ? "failed" : "complete_with_errors"
+      : warning > 0 ? "complete_with_warnings" : "complete";
     const finished = (options.now ?? (() => new Date()))();
     const chunksManifest: ChunksManifest = {
       formatVersion: CHUNKS_MANIFEST_FORMAT_VERSION,
@@ -178,6 +182,7 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
       durationMs: Math.max(0, finished.getTime() - started.getTime()),
       workspaceCount: workspaceResults.length,
       successfulWorkspaces: successful,
+      warningWorkspaces: warning,
       failedWorkspaces: failed,
       processedDocuments: sum(workspaceResults, "processedDocuments"),
       chunksCreated: sum(workspaceResults, "chunksCreated"),
@@ -253,10 +258,17 @@ async function processWorkspace(options: {
       onProgress: options.onProgress,
     });
     if (result.report.errors > 0) {
-      await rm(chunksFile, { force: true });
       const message = `Chunking contains ${result.report.errors} document error(s).`;
+      if (result.report.processed_documents === 0) {
+        await rm(chunksFile, { force: true });
+        return {
+          ...base, status: "failed", processedDocuments: 0,
+          chunksCreated: 0, errors: result.report.errors, error: message,
+        };
+      }
       return {
-        ...base, status: "failed", processedDocuments: result.report.processed_documents,
+        ...base, chunksPath: chunksRelative, status: "complete_with_warnings",
+        processedDocuments: result.report.processed_documents,
         chunksCreated: result.report.chunks_created, errors: result.report.errors, error: message,
       };
     }

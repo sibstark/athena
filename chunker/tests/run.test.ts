@@ -41,6 +41,7 @@ describe("chunk run", () => {
       status: "complete_with_errors",
       workspaceCount: 3,
       successfulWorkspaces: 2,
+      warningWorkspaces: 0,
       failedWorkspaces: 1,
       processedDocuments: 1,
       errors: 1,
@@ -53,7 +54,45 @@ describe("chunk run", () => {
     expect(failedReport.errors).toBe(1);
   });
 
-  it("does not publish partial chunks for a damaged workspace", async () => {
+  it("publishes valid documents and reports a damaged document as a warning", async () => {
+    const root = await mkdtemp(join(tmpdir(), "athena-chunk-run-"));
+    const input = join(root, "normalized_8");
+    const output = join(root, "chunks_8");
+    await writeRunFixture(input, [workspace(1, "complete")], "run_8");
+    await writeWorkspace(input, 1, [
+      document("page_1", "## Рабочий документ\n\nПолезный материал."),
+      document("page_2", "```plaintext\nНезакрытый блок"),
+    ]);
+
+    const result = await chunkNormalizedRun({ runDir: input, outputDir: output, tokenCounter: wordCounter });
+
+    expect(result.report).toMatchObject({
+      status: "complete_with_warnings",
+      successfulWorkspaces: 1,
+      warningWorkspaces: 1,
+      failedWorkspaces: 0,
+      processedDocuments: 1,
+      errors: 1,
+    });
+    expect(result.manifest.formatVersion).toBe(2);
+    expect(result.manifest.workspaces[0]).toMatchObject({
+      status: "complete_with_warnings",
+      chunksPath: "workspace_1/chunks.jsonl",
+      processedDocuments: 1,
+      errors: 1,
+    });
+    const chunks = await readFile(join(output, "workspace_1", "chunks.jsonl"), "utf8");
+    expect(chunks).toContain('"document_id":"page_1"');
+    expect(chunks).not.toContain('"document_id":"page_2"');
+    const report = JSON.parse(await readFile(join(output, "workspace_1", "chunk_report.json"), "utf8")) as {
+      errors: number;
+      error_documents: Array<{ document_id: string }>;
+    };
+    expect(report.errors).toBe(1);
+    expect(report.error_documents).toEqual([expect.objectContaining({ document_id: "page_2" })]);
+  });
+
+  it("does not publish an empty partial workspace when every document is damaged", async () => {
     const root = await mkdtemp(join(tmpdir(), "athena-chunk-run-"));
     const input = join(root, "normalized_9");
     const output = join(root, "chunks_9");

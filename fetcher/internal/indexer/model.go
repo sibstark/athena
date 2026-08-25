@@ -190,21 +190,24 @@ type Dependencies struct {
 }
 
 type RunWorkspaceReport struct {
-	WorkspaceID        int     `json:"workspace_id"`
-	WorkspaceName      string  `json:"workspace_name"`
-	WorkspacePath      string  `json:"workspace_path"`
-	Collection         string  `json:"collection"`
-	Status             string  `json:"status"`
-	InputFile          *string `json:"input_file"`
-	ReportFile         *string `json:"report_file"`
-	InputChunks        int     `json:"input_chunks"`
-	EmbeddedChunks     int     `json:"embedded_chunks"`
-	PayloadOnlyUpdates int     `json:"payload_only_updates"`
-	SkippedUnchanged   int     `json:"skipped_unchanged"`
-	StaleChunksFound   int     `json:"stale_chunks_found"`
-	DeletedChunks      int     `json:"deleted_chunks"`
-	FailedChunks       int     `json:"failed_chunks"`
-	Error              *string `json:"error"`
+	WorkspaceID          int     `json:"workspace_id"`
+	WorkspaceName        string  `json:"workspace_name"`
+	WorkspacePath        string  `json:"workspace_path"`
+	Collection           string  `json:"collection"`
+	Status               string  `json:"status"`
+	SourceStatus         string  `json:"source_status"`
+	SourceDocumentErrors int     `json:"source_document_errors"`
+	ChunkReportFile      *string `json:"chunk_report_file"`
+	InputFile            *string `json:"input_file"`
+	ReportFile           *string `json:"report_file"`
+	InputChunks          int     `json:"input_chunks"`
+	EmbeddedChunks       int     `json:"embedded_chunks"`
+	PayloadOnlyUpdates   int     `json:"payload_only_updates"`
+	SkippedUnchanged     int     `json:"skipped_unchanged"`
+	StaleChunksFound     int     `json:"stale_chunks_found"`
+	DeletedChunks        int     `json:"deleted_chunks"`
+	FailedChunks         int     `json:"failed_chunks"`
+	Error                *string `json:"error"`
 }
 
 type RunReport struct {
@@ -220,6 +223,7 @@ type RunReport struct {
 	WorkspaceCount       int                  `json:"workspace_count"`
 	ProcessedWorkspaces  int                  `json:"processed_workspaces"`
 	SuccessfulWorkspaces int                  `json:"successful_workspaces"`
+	WarningWorkspaces    int                  `json:"warning_workspaces"`
 	FailedWorkspaces     int                  `json:"failed_workspaces"`
 	SkippedWorkspaces    int                  `json:"skipped_workspaces"`
 	Totals               ReportTotals         `json:"totals"`

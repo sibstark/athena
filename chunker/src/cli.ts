@@ -48,12 +48,14 @@ program.action(async (options: {
       onProgress: console.log,
     });
     console.log(`Status: ${result.report.status}`);
-    console.log(`Workspaces: ${result.report.successfulWorkspaces} complete, ${result.report.failedWorkspaces} failed`);
+    console.log(`Workspaces: ${result.report.successfulWorkspaces} successful (${result.report.warningWorkspaces} with warnings), ${result.report.failedWorkspaces} failed`);
     console.log(`Documents: ${result.report.processedDocuments}; chunks: ${result.report.chunksCreated}; errors: ${result.report.errors}`);
     console.log(`Output: ${result.outputDir}`);
     console.log(`Manifest: ${result.manifestFile}`);
     console.log(`Report: ${result.reportFile}`);
-    if (result.report.status !== "complete") throw new Error(`Chunk run finished with status ${result.report.status}; see ${result.reportFile}`);
+    if (result.report.status !== "complete" && result.report.status !== "complete_with_warnings") {
+      throw new Error(`Chunk run finished with status ${result.report.status}; see ${result.reportFile}`);
+    }
     return;
   }
   if (!options.input || !options.tree || !options.output) {

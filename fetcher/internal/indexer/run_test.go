@@ -75,6 +75,33 @@ func TestIndexRunSkipsFailedChunkWorkspaceWithoutChangingQdrant(t *testing.T) {
 	}
 }
 
+func TestIndexRunProcessesWarningWorkspaceAndPrunesFailedDocumentPoints(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "chunks_1")
+	writeRunFixtureVersion(t, root, []map[string]any{
+		{"id": 25, "name": "Marketing", "path": "workspace_25", "qdrantCollection": "workspace_25", "status": "complete_with_warnings", "errors": 1},
+	}, 2)
+	store := newFakeStore()
+	store.points["stale-failed-document"] = Point{ID: "stale-failed-document", Vector: unitVector(), Payload: map[string]any{}}
+
+	report, err := IndexRun(context.Background(), RunConfig{RunDir: root, BatchSize: 2}, Dependencies{Provider: &fakeProvider{}, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "complete_with_warnings" || report.SuccessfulWorkspaces != 1 || report.WarningWorkspaces != 1 || report.FailedWorkspaces != 0 {
+		t.Fatalf("report = %+v", report)
+	}
+	if report.Totals.EmbeddedChunks != 1 || report.Totals.DeletedChunks != 1 || len(store.points) != 1 {
+		t.Fatalf("totals=%+v points=%+v", report.Totals, store.points)
+	}
+	workspace := report.Workspaces[0]
+	if workspace.Status != "complete_with_warnings" || workspace.SourceStatus != "complete_with_warnings" || workspace.SourceDocumentErrors != 1 {
+		t.Fatalf("workspace = %+v", workspace)
+	}
+	if workspace.ChunkReportFile == nil || *workspace.ChunkReportFile != "workspace_25/chunk_report.json" {
+		t.Fatalf("chunk report = %v", workspace.ChunkReportFile)
+	}
+}
+
 func TestIndexRunEmptyWorkspacePrunesEveryManagedPoint(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "chunks_1")
 	writeRunFixture(t, root, []map[string]any{
@@ -96,12 +123,17 @@ func TestIndexRunEmptyWorkspacePrunesEveryManagedPoint(t *testing.T) {
 
 func writeRunFixture(t *testing.T, root string, workspaces []map[string]any) {
 	t.Helper()
+	writeRunFixtureVersion(t, root, workspaces, 1)
+}
+
+func writeRunFixtureVersion(t *testing.T, root string, workspaces []map[string]any, formatVersion int) {
+	t.Helper()
 	for _, raw := range workspaces {
 		path := filepath.Join(root, raw["path"].(string))
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		writeJSONFile(t, filepath.Join(path, "chunk_report.json"), map[string]any{"errors": 0})
+		writeJSONFile(t, filepath.Join(path, "chunk_report.json"), map[string]any{"errors": raw["errors"]})
 		raw["chunksPath"] = filepath.ToSlash(filepath.Join(raw["path"].(string), "chunks.jsonl"))
 		raw["reportPath"] = filepath.ToSlash(filepath.Join(raw["path"].(string), "chunk_report.json"))
 		file, err := os.Create(filepath.Join(path, "chunks.jsonl"))
@@ -116,7 +148,7 @@ func writeRunFixture(t *testing.T, root string, workspaces []map[string]any) {
 		}
 	}
 	writeJSONFile(t, filepath.Join(root, "chunks_manifest.json"), map[string]any{
-		"formatVersion": 1, "sourceRun": "run_1", "sourceNormalization": "normalized_1", "workspaces": workspaces,
+		"formatVersion": formatVersion, "sourceRun": "run_1", "sourceNormalization": "normalized_1", "workspaces": workspaces,
 	})
 }
 

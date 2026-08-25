@@ -35,17 +35,22 @@ type Generator interface {
 	Model() string
 }
 type Readiness interface{ Ready(context.Context) error }
+type Qdrant interface {
+	Readiness
+	ListCollections(context.Context) ([]string, error)
+}
 
 type Server struct {
-	cfg                   config.Config
-	retriever             Retriever
-	generator             Generator
-	teiReady, qdrantReady Readiness
-	builder               contextbuilder.Builder
-	metrics               *observability.Metrics
-	logger                *slog.Logger
-	auth                  *athenaauth.Manager
-	handler               http.Handler
+	cfg       config.Config
+	retriever Retriever
+	generator Generator
+	teiReady  Readiness
+	qdrant    Qdrant
+	builder   contextbuilder.Builder
+	metrics   *observability.Metrics
+	logger    *slog.Logger
+	auth      *athenaauth.Manager
+	handler   http.Handler
 }
 
 type requestIDKey struct{}
@@ -54,9 +59,9 @@ var citationPattern = regexp.MustCompile(`\[S([1-9][0-9]*)\]`)
 
 const sessionCookieName = "athena_session"
 
-func New(cfg config.Config, retriever Retriever, generator Generator, teiReady, qdrantReady Readiness, metrics *observability.Metrics, logger *slog.Logger) *Server {
+func New(cfg config.Config, retriever Retriever, generator Generator, teiReady Readiness, qdrant Qdrant, metrics *observability.Metrics, logger *slog.Logger) *Server {
 	authManager := athenaauth.New(athenaauth.Config{Username: cfg.AuthUsername, PasswordHash: cfg.AuthPasswordHash, SessionSecret: cfg.AuthSessionSecret, SessionTTL: cfg.AuthSessionTTL}, time.Now)
-	s := &Server{cfg: cfg, retriever: retriever, generator: generator, teiReady: teiReady, qdrantReady: qdrantReady, builder: contextbuilder.Builder{MaxChars: cfg.MaxContextChars, MaxChunks: cfg.MaxContextChunks}, metrics: metrics, logger: logger, auth: authManager}
+	s := &Server{cfg: cfg, retriever: retriever, generator: generator, teiReady: teiReady, qdrant: qdrant, builder: contextbuilder.Builder{MaxChars: cfg.MaxContextChars, MaxChunks: cfg.MaxContextChunks}, metrics: metrics, logger: logger, auth: authManager}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", s.live)
 	mux.HandleFunc("GET /health/ready", s.ready)
@@ -64,6 +69,7 @@ func New(cfg config.Config, retriever Retriever, generator Generator, teiReady, 
 	mux.HandleFunc("POST /v1/auth/login", s.login)
 	mux.HandleFunc("GET /v1/auth/session", s.session)
 	mux.HandleFunc("POST /v1/auth/logout", s.logout)
+	mux.HandleFunc("GET /v1/collections", s.collections)
 	mux.HandleFunc("POST /v1/search", s.search)
 	mux.HandleFunc("POST /v1/answer", s.answer)
 	s.handler = s.recovery(s.requestID(s.logging(s.cors(s.authorize(mux)))))
@@ -82,11 +88,23 @@ func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, r, http.StatusServiceUnavailable, "tei_unavailable", "TEI недоступен")
 		return
 	}
-	if err := s.qdrantReady.Ready(ctx); err != nil {
+	if err := s.qdrant.Ready(ctx); err != nil {
 		s.writeError(w, r, http.StatusServiceUnavailable, "qdrant_unavailable", "Qdrant недоступен")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+}
+
+func (s *Server) collections(w http.ResponseWriter, r *http.Request) {
+	collections, err := s.qdrant.ListCollections(r.Context())
+	if err != nil {
+		s.downstreamError(w, r, err)
+		return
+	}
+	if collections == nil {
+		collections = []string{}
+	}
+	writeJSON(w, http.StatusOK, models.CollectionsResponse{RequestID: requestID(r.Context()), Collections: collections})
 }
 func (s *Server) prometheus(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -360,7 +378,8 @@ func (s *Server) sessionUsername(r *http.Request) (string, bool) {
 }
 
 func isProtectedEndpoint(r *http.Request) bool {
-	return r.Method == http.MethodPost && (r.URL.Path == "/v1/search" || r.URL.Path == "/v1/answer")
+	return (r.Method == http.MethodPost && (r.URL.Path == "/v1/search" || r.URL.Path == "/v1/answer")) ||
+		(r.Method == http.MethodGet && r.URL.Path == "/v1/collections")
 }
 
 func clientIP(r *http.Request) string {
