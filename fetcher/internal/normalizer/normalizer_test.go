@@ -29,7 +29,7 @@ func TestNormalizeCurrentFetcherLayout(t *testing.T) {
 		3053: testMarkdown(empty, workspace, ""),
 	})
 
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_100")
 	result, err := Normalize(Options{RunDir: run, OutputDir: output, Now: fixedClock()})
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +72,17 @@ func TestNormalizeCurrentFetcherLayout(t *testing.T) {
 	readJSONFile(t, filepath.Join(output, "workspace_17", "normalization_report.json"), &report)
 	if report.FoundFiles != 3 || report.ProcessedDocuments != 2 || report.EmptyFiles != 1 || report.Errors != 0 {
 		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestNormalizeRequiresMatchingRunAndNormalizedSuffixes(t *testing.T) {
+	t.Parallel()
+	run := filepath.Join(t.TempDir(), "run_42")
+	if err := os.MkdirAll(run, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := validatePaths(run, filepath.Join(t.TempDir(), "normalized_41")); err == nil || !strings.Contains(err.Error(), "normalized_42") {
+		t.Fatalf("expected suffix validation error, got %v", err)
 	}
 }
 
@@ -152,7 +163,7 @@ func TestDuplicatesRemainAndAreAnnotated(t *testing.T) {
 		10: testMarkdown(first, workspace, "# Same\n\nText"),
 		11: testMarkdown(second, workspace, "# Same\r\n\r\nText   \r\n"),
 	})
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_101")
 	if _, err := Normalize(Options{RunDir: run, OutputDir: output}); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +185,7 @@ func TestPartialResultSkipsInvalidDocument(t *testing.T) {
 		10: testMarkdown(valid, workspace, "Useful content that is long enough to normalize without being empty."),
 		11: {0xc3, 0x28},
 	})
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_102")
 	result, err := Normalize(Options{RunDir: run, OutputDir: output})
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +218,7 @@ func TestIntegrityWarningsForFrontMatterAssetsAndLinks(t *testing.T) {
 		"![Missing](../assets/missing.png)", "", "![Mail](mailto:test@example.com)", "", "![Mail again](mailto:test@example.com)", "", "[Unknown](https://example.com/note/document/999/)",
 	}, "\n")
 	writeTestRun(t, run, []SourceWorkspace{workspace}, map[int][]byte{10: []byte(body)})
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_103")
 	result, err := Normalize(Options{RunDir: run, OutputDir: output})
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +262,7 @@ func TestWorkspaceFiltersForceAndDeterminism(t *testing.T) {
 		10: testMarkdown(firstDocument, firstWorkspace, strings.Repeat("First ", 40)),
 		20: testMarkdown(secondDocument, secondWorkspace, strings.Repeat("Second ", 40)),
 	})
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_104")
 	clock := fixedClock()
 	options := Options{RunDir: run, OutputDir: output, Include: map[int]struct{}{2: {}}, Now: clock}
 	if _, err := Normalize(options); err != nil {
@@ -295,7 +306,7 @@ func TestInvalidWorkspaceDoesNotBlockOtherWorkspaces(t *testing.T) {
 		10: testMarkdown(goodDocument, goodWorkspace, strings.Repeat("Good content ", 30)),
 		20: testMarkdown(badDocument, badWorkspace, strings.Repeat("Bad content ", 30)),
 	})
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_105")
 	result, err := Normalize(Options{RunDir: run, OutputDir: output})
 	if err != nil {
 		t.Fatal(err)

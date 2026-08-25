@@ -4,7 +4,7 @@
 
 ```text
 fetcher/     Все БЗ Bitrix24 → immutable runs; Go normalizer и indexer
-chunker/     normalized.jsonl → chunks.jsonl
+chunker/     Все normalized workspace → отдельный chunks run
 tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
 rag-api/     Go HTTP API → TEI + read-only Qdrant + DeepSeek
 web/         React chat UI → same-origin nginx proxy → rag-api
@@ -17,7 +17,7 @@ var/tei/     кеш модели TEI (не в Git)
 
 CLI не вызывают внешние сервисы автоматически. В каждом каталоге свой manifest зависимостей (`package.json`/`bun.lock` или `go.mod`/`go.sum`). Общие Qdrant и TEI запускаются корневым Docker Compose.
 
-`fetcher` — отдельный Go-проект для полного снимка Базы знаний 2.0. Каждый запуск сохраняется в новом `run_<unix_ms>` и регистрируется в `runs.json`; старые запуски не перезаписываются. Команда `fetcher normalize` преобразует завершённый run в per-workspace `normalized.jsonl` и `document_tree.json`, не меняя snapshot. После отдельного запуска `chunker` команда `fetcher index` синхронизирует готовые chunks с Qdrant через внешний TEI.
+`fetcher` сохраняет снимок в `run_<id>` и нормализует его в отдельный `normalized_<id>`. TypeScript chunker одним запуском обрабатывает все объявленные workspace и создаёт `chunks_<id>`. После этого Go-indexer синхронизирует каждую успешную workspace-коллекцию с Qdrant через внешний TEI.
 
 Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
 
@@ -116,7 +116,17 @@ go run ./cmd/fetcher fetch --out ../data/exports/bitrix
 cd fetcher
 go run ./cmd/fetcher normalize \
   --run ../data/fetcher/run_<unix_ms> \
-  --out ../data/normalized/run_<unix_ms>
+  --out ../data/normalized/normalized_<unix_ms>
 ```
 
-После этого `chunker` запускается отдельно для каждого `workspace_<id>`, а `fetcher index --run ../data/normalized/run_<unix_ms>` одним запуском синхронизирует все объявленные в `normalization_manifest.json` коллекции с Qdrant и удаляет устаревшие точки внутри успешно обработанных коллекций.
+```bash
+cd ../chunker
+bun run chunk -- \
+  --run ../data/normalized/normalized_<unix_ms> \
+  --out ../data/chunks/chunks_<unix_ms>
+
+cd ../fetcher
+go run ./cmd/fetcher index --run ../data/chunks/chunks_<unix_ms>
+```
+
+Postfix на всех стадиях должен совпадать. Indexer читает `chunks_manifest.json`, синхронизирует все успешные workspace и удаляет отсутствующие точки внутри каждой такой коллекции.

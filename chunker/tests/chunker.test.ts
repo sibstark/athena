@@ -176,19 +176,50 @@ describe("Markdown chunker", () => {
     );
   });
 
-  it("never splits fenced code and marks oversized code", async () => {
+  it("hard-splits a single oversized table row within the model limit", async () => {
+    const header = "| Имя | Описание |\n| --- | --- |";
+    const row = `| Строка | ${Array.from({ length: 120 }, () => "данные").join(" ")} |`;
+    const result = await run([document(`## Таблица\n\n${header}\n${row}`)], {
+      targetTokens: 25,
+      maxTokens: 35,
+      overlapTokens: 0,
+    });
+
+    expect(result.chunks.length).toBeGreaterThan(1);
+    expect(result.chunks.every((chunk) => chunk.metadata.token_count <= 35)).toBe(true);
+    expect(result.report.chunks_above_max_tokens).toBe(0);
+  });
+
+  it("hard-splits an oversized protected inline atom within the model limit", async () => {
+    const atom = `\`${Array.from({ length: 120 }, () => "value").join(" ")}\``;
+    const result = await run([document(`## Значение\n\n${atom}`)], {
+      targetTokens: 25,
+      maxTokens: 35,
+      overlapTokens: 0,
+    });
+
+    expect(result.chunks.length).toBeGreaterThan(1);
+    expect(result.chunks.every((chunk) => chunk.metadata.token_count <= 35)).toBe(true);
+    expect(result.report.chunks_above_max_tokens).toBe(0);
+  });
+
+  it("hard-splits oversized fenced code within the model limit", async () => {
     const code = ["```ts", ...Array.from({ length: 70 }, (_, index) => `const v${index} = ${index};`), "```"].join("\n");
     const result = await run([document(`## Код\n\n${code}`)], {
       targetTokens: 25,
       maxTokens: 35,
+      overlapTokens: 0,
     });
-    const codeChunk = result.chunks.find((chunk) => chunk.metadata.contains_code);
+    const codeChunks = result.chunks.filter((chunk) => chunk.metadata.contains_code);
 
-    expect(codeChunk?.content).toContain(code);
-    expect(codeChunk?.metadata).toMatchObject({
-      oversized: true,
-      oversized_reason: "code_block",
-    });
+    expect(result.chunks.length).toBeGreaterThan(1);
+    expect(codeChunks.length).toBeGreaterThan(1);
+    expect(result.chunks.every((chunk) => chunk.metadata.token_count <= 35)).toBe(true);
+    expect(result.report.chunks_above_max_tokens).toBe(0);
+    const combinedCode = codeChunks.map((chunk) => chunk.content).join(" ").replace(/\s+/gu, " ");
+    for (let index = 0; index < 70; index += 1) {
+      expect(combinedCode).toContain(`const v${index} = ${index};`);
+    }
   });
 
   it("preserves image Markdown but transforms images for embedding_text", async () => {

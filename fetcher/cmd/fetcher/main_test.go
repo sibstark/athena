@@ -56,7 +56,7 @@ func TestRunNormalizeCreatesWorkspaceOutputsWithoutBitrixConfiguration(t *testin
 	}
 	writeMainTestJSON(t, filepath.Join(runDirectory, "manifest.json"), manifest)
 	writeMainTestJSON(t, filepath.Join(runDirectory, "report.json"), map[string]any{"runId": "run_1", "status": "complete"})
-	output := filepath.Join(t.TempDir(), "normalized")
+	output := filepath.Join(t.TempDir(), "normalized_1")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if err := runNormalize([]string{"--run", runDirectory, "--out", output, "--include", "17"}, &stdout, &stderr); err != nil {

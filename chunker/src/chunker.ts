@@ -171,7 +171,6 @@ export interface ChunkOptions {
   tokenizer?: string;
   tokenizerRevision?: string;
   tokenizerCacheDir?: string;
-  offline?: boolean;
   force?: boolean;
   onProgress?: (message: string) => void;
 }
@@ -335,7 +334,7 @@ export async function chunkNormalizedDocuments(
           tokenCounter,
         },
       );
-      validateDocumentChunks(document, documentChunks, tokenCounter, nodes);
+      validateDocumentChunks(document, documentChunks, tokenCounter, maxTokens, nodes);
       chunks.push(...documentChunks);
       report.processed_documents += 1;
       log(
@@ -372,7 +371,6 @@ async function createDefaultTokenCounter(options: ChunkOptions): Promise<TokenCo
       DEFAULT_TOKENIZER_REVISION,
     cacheDir:
       options.tokenizerCacheDir ?? process.env.EMBEDDING_CACHE_DIR?.trim() ?? "../var/models",
-    offline: Boolean(options.offline),
   });
 }
 
@@ -685,7 +683,7 @@ function expandBlocks(
       continue;
     }
     if (block.kind === "code") {
-      units.push({ ...block, forceOwn: true, oversizedReason: "code_block" });
+      units.push(...splitHardBlock(document, section, block, options));
       continue;
     }
     if (block.kind === "table") {
@@ -697,14 +695,14 @@ function expandBlocks(
       continue;
     }
     if (block.kind === "html") {
-      units.push({ ...block, forceOwn: true, oversizedReason: "html_block" });
+      units.push(...splitHardBlock(document, section, block, options));
       continue;
     }
     if (block.kind === "paragraph") {
       units.push(...splitParagraph(document, section, block.raw, options));
       continue;
     }
-    units.push({ ...block, forceOwn: true, oversizedReason: "context_prefix" });
+    units.push(...splitHardBlock(document, section, block, options));
   }
   return units;
 }
@@ -756,20 +754,20 @@ function splitTable(
   const header = lines.slice(0, 2);
   const rows = lines.slice(2);
   if (rows.length === 0) {
-    return [{ ...block, forceOwn: true, oversizedReason: "table_row" }];
+    return splitHardBlock(document, section, block, options);
   }
-  const parts: Array<{ raw: string; oversized?: OversizedReason }> = [];
+  const parts: string[] = [];
   let currentRows: string[] = [];
   const flush = (): void => {
     if (currentRows.length === 0) return;
-    parts.push({ raw: [...header, ...currentRows].join("\n") });
+    parts.push([...header, ...currentRows].join("\n"));
     currentRows = [];
   };
   for (const row of rows) {
     const rowCandidate = [...header, row].join("\n");
     if (countCandidate(document, section, rowCandidate, options.tokenCounter) > options.maxTokens) {
       flush();
-      parts.push({ raw: rowCandidate, oversized: "table_row" });
+      parts.push(...splitContentToFit(document, section, rowCandidate, options));
       continue;
     }
     const candidate = [...header, ...currentRows, row].join("\n");
@@ -780,9 +778,8 @@ function splitTable(
   flush();
   return parts.map((part, index) => ({
     kind: "table",
-    raw: part.raw,
+    raw: part,
     forceOwn: true,
-    ...(part.oversized ? { oversizedReason: part.oversized } : {}),
     tablePart: index + 1,
     tablePartsTotal: parts.length,
   }));
@@ -835,18 +832,91 @@ function splitInlineAtoms(
     }
     if (countCandidate(document, section, atom.trim(), options.tokenCounter) > options.maxTokens) {
       flush();
-      units.push({
-        kind: "paragraph",
-        raw: atom.trim(),
-        forceOwn: true,
-        oversizedReason: "inline_atom",
-      });
+      units.push(
+        ...splitContentToFit(document, section, atom.trim(), options).map((part) => ({
+          kind: "paragraph" as const,
+          raw: part,
+          forceOwn: true,
+          overlapEligible: false,
+        })),
+      );
     } else {
       current += atom;
     }
   }
   flush();
   return units;
+}
+
+function splitHardBlock(
+  document: NormalizedDocument,
+  section: MarkdownSection,
+  block: MarkdownBlock,
+  options: { maxTokens: number; tokenCounter: TokenCounter },
+): ChunkUnit[] {
+  return splitContentToFit(document, section, trimBlankLines(block.raw), options).map((part) => ({
+    kind: block.kind,
+    raw: part,
+    forceOwn: true,
+    overlapEligible: false,
+  }));
+}
+
+function splitContentToFit(
+  document: NormalizedDocument,
+  section: MarkdownSection,
+  raw: string,
+  options: { maxTokens: number; tokenCounter: TokenCounter },
+): string[] {
+  let remaining = trimBlankLines(raw);
+  const parts: string[] = [];
+  while (remaining) {
+    if (countCandidate(document, section, remaining, options.tokenCounter) <= options.maxTokens) {
+      parts.push(remaining);
+      break;
+    }
+
+    const characters = [...remaining];
+    let low = 1;
+    let high = characters.length;
+    let fittingLength = 0;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const candidate = characters.slice(0, middle).join("").trimEnd();
+      if (candidate && countCandidate(document, section, candidate, options.tokenCounter) <= options.maxTokens) {
+        fittingLength = middle;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    if (fittingLength === 0) {
+      throw new Error("Chunk context prefix exceeds maxTokens before document content is added.");
+    }
+
+    let splitAt = fittingLength;
+    const preferredMinimum = Math.floor(fittingLength / 2);
+    for (let index = fittingLength - 1; index >= preferredMinimum; index -= 1) {
+      if (/\s/u.test(characters[index] ?? "")) {
+        splitAt = index + 1;
+        break;
+      }
+    }
+    let part = characters.slice(0, splitAt).join("").trimEnd();
+    while (
+      part &&
+      countCandidate(document, section, part, options.tokenCounter) > options.maxTokens
+    ) {
+      splitAt -= 1;
+      part = characters.slice(0, splitAt).join("").trimEnd();
+    }
+    if (!part || splitAt <= 0) {
+      throw new Error("Unable to split document content within maxTokens.");
+    }
+    parts.push(part);
+    remaining = characters.slice(splitAt).join("").trimStart();
+  }
+  return parts;
 }
 
 function packUnits(
@@ -1250,6 +1320,7 @@ function validateDocumentChunks(
   document: NormalizedDocument,
   chunks: ChunkRecord[],
   tokenCounter: TokenCounter,
+  maxTokens: number,
   nodes: Map<string, DocumentTreeNode>,
 ): void {
   if (chunks.length === 0) throw new Error("No non-empty chunks were produced.");
@@ -1262,6 +1333,9 @@ function validateDocumentChunks(
     }
     if (chunk.metadata.token_count !== tokenCounter.count(chunk.embedding_text)) {
       throw new Error("A chunk token_count does not match the tokenizer.");
+    }
+    if (chunk.metadata.token_count > maxTokens) {
+      throw new Error(`A chunk exceeds maxTokens (${chunk.metadata.token_count} > ${maxTokens}).`);
     }
     if (chunk.metadata.chunk_index !== index || chunk.metadata.chunk_count !== chunks.length) {
       throw new Error("Chunk indexes are inconsistent.");

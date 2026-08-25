@@ -88,7 +88,7 @@ Normalize every workspace:
 ```bash
 go run ./cmd/fetcher normalize \
   --run ../data/fetcher/run_1787220682160 \
-  --out ../data/normalized/run_1787220682160
+  --out ../data/normalized/normalized_1787220682160
 ```
 
 Normalize selected workspaces and atomically replace an existing result:
@@ -96,16 +96,16 @@ Normalize selected workspaces and atomically replace an existing result:
 ```bash
 go run ./cmd/fetcher normalize \
   --run ../data/fetcher/run_1787220682160 \
-  --out ../data/normalized/run_1787220682160 \
+  --out ../data/normalized/normalized_1787220682160 \
   --include 17,27 \
   --short-note-threshold 200 \
   --force
 ```
 
-`--include` and `--exclude` have the same repeatable, comma-separated semantics as `fetch`. The output directory must not contain the source run or be located inside it.
+`--include` and `--exclude` have the same repeatable, comma-separated semantics as `fetch`. Имя выхода обязано соответствовать исходному `run_<id>`: `normalized_<id>`. Каталоги не должны содержать друг друга.
 
 ```text
-data/normalized/run_1787220682160/
+data/normalized/normalized_1787220682160/
 ├── normalization_manifest.json
 ├── normalization_report.json
 ├── workspace_17/
@@ -122,32 +122,31 @@ Normalization preserves partial results. Invalid documents are skipped and recor
 
 Suspicious-content heuristics report missing TOC sections, terminal headings or empty list markers, unclosed code fences, and empty/very short leaf documents. They do not change `indexable`, because these checks can have false positives. Integrity diagnostics also cover Front Matter mismatches, missing local assets, broken internal document links, and invalid trees.
 
-Pass one workspace to the chunker:
+Chunk every workspace declared by the normalization manifest:
 
 ```bash
 cd ../chunker
 bun run chunk -- \
-  --input ../data/normalized/run_1787220682160/workspace_17/normalized.jsonl \
-  --tree ../data/normalized/run_1787220682160/workspace_17/document_tree.json \
-  --output ../data/normalized/run_1787220682160/workspace_17/chunks.jsonl \
-  --force
+  --run ../data/normalized/normalized_1787220682160 \
+  --out ../data/chunks/chunks_1787220682160 \
+  --tokenizer-cache ../var/models
 ```
 
-После создания `chunks.jsonl` для всех выбранных workspace синхронизируйте весь run с Qdrant одной командой:
+Chunker создаёт отдельный `chunks_<id>` с `chunks_manifest.json`, `chunks_report.json` и per-workspace artifacts. Затем синхронизируйте весь run с Qdrant:
 
 ```bash
 cd ../fetcher
 go run ./cmd/fetcher index \
-  --run ../data/normalized/run_1787220682160
+  --run ../data/chunks/chunks_1787220682160
 ```
 
-Go-indexer использует `qdrantCollection` из `normalization_manifest.json` и автоматически удаляет устаревшие точки только после успешной обработки соответствующего workspace. Workspace обрабатываются последовательно; ошибка одного не блокирует остальные, но итоговая команда возвращает ненулевой код.
+Go-indexer использует `qdrantCollection` и пути из `chunks_manifest.json` и автоматически удаляет устаревшие точки только после успешной обработки соответствующего workspace. Failed workspace не меняет коллекцию; пустой successful workspace очищает её. Workspace обрабатываются последовательно; ошибка одного не блокирует остальные, но итоговая команда возвращает ненулевой код.
 
 Для одной коллекции доступен отдельный режим:
 
 ```bash
 go run ./cmd/fetcher index \
-  --input ../data/normalized/accounting/chunks.jsonl \
+  --input ../data/chunks/accounting/chunks.jsonl \
   --collection accounting_e5_small_v1 \
   --prune
 ```

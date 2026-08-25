@@ -12,10 +12,11 @@ import (
 
 const runReportFormatVersion = 1
 
-type normalizationManifest struct {
-	FormatVersion int                 `json:"formatVersion"`
-	SourceRun     string              `json:"sourceRun"`
-	Workspaces    []manifestWorkspace `json:"workspaces"`
+type chunksManifest struct {
+	FormatVersion       int                 `json:"formatVersion"`
+	SourceRun           string              `json:"sourceRun"`
+	SourceNormalization string              `json:"sourceNormalization"`
+	Workspaces          []manifestWorkspace `json:"workspaces"`
 }
 
 type manifestWorkspace struct {
@@ -23,6 +24,8 @@ type manifestWorkspace struct {
 	Name             string `json:"name"`
 	Path             string `json:"path"`
 	QdrantCollection string `json:"qdrantCollection"`
+	ChunksPath       string `json:"chunksPath"`
+	ReportPath       string `json:"reportPath"`
 	Status           string `json:"status"`
 	Errors           int    `json:"errors"`
 }
@@ -62,9 +65,9 @@ func IndexRun(ctx context.Context, config RunConfig, dependencies Dependencies) 
 			config.Progress(fmt.Sprintf("[%d/%d] Syncing workspace %s (%d) to %s...", index+1, len(workspaces), workspace.Name, workspace.ID, workspace.QdrantCollection))
 		}
 		if workspace.Status == "failed" || workspace.Errors > 0 {
-			message := "normalization status is failed; the Qdrant collection was not changed"
+			message := "chunking status is failed; the Qdrant collection was not changed"
 			if workspace.Errors > 0 {
-				message = fmt.Sprintf("normalization contains %d error(s); the Qdrant collection was not changed", workspace.Errors)
+				message = fmt.Sprintf("chunking contains %d error(s); the Qdrant collection was not changed", workspace.Errors)
 			}
 			report.Workspaces = append(report.Workspaces, skippedWorkspace(workspace, paths, config.RunDir, message))
 			report.SkippedWorkspaces++
@@ -111,42 +114,54 @@ func IndexRun(ctx context.Context, config RunConfig, dependencies Dependencies) 
 	return report, nil
 }
 
-func validateRun(runDir string) (normalizationManifest, []manifestWorkspace, map[int]workspacePaths, error) {
-	var manifest normalizationManifest
-	manifestPath := filepath.Join(runDir, "normalization_manifest.json")
+func validateRun(runDir string) (chunksManifest, []manifestWorkspace, map[int]workspacePaths, error) {
+	var manifest chunksManifest
+	manifestPath := filepath.Join(runDir, "chunks_manifest.json")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return manifest, nil, nil, fmt.Errorf("cannot read normalization manifest %s: %w", manifestPath, err)
+		return manifest, nil, nil, fmt.Errorf("cannot read chunks manifest %s: %w", manifestPath, err)
 	}
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return manifest, nil, nil, fmt.Errorf("cannot parse normalization manifest %s: %w", manifestPath, err)
+		return manifest, nil, nil, fmt.Errorf("cannot parse chunks manifest %s: %w", manifestPath, err)
 	}
 	if manifest.FormatVersion != 1 {
-		return manifest, nil, nil, fmt.Errorf("unsupported normalization manifest formatVersion: %d", manifest.FormatVersion)
+		return manifest, nil, nil, fmt.Errorf("unsupported chunks manifest formatVersion: %d", manifest.FormatVersion)
 	}
 	if strings.TrimSpace(manifest.SourceRun) == "" {
-		return manifest, nil, nil, fmt.Errorf("normalization manifest sourceRun must be non-empty")
+		return manifest, nil, nil, fmt.Errorf("chunks manifest sourceRun must be non-empty")
+	}
+	runName := filepath.Base(filepath.Clean(runDir))
+	if !strings.HasPrefix(runName, "chunks_") || len(runName) == len("chunks_") {
+		return manifest, nil, nil, fmt.Errorf("chunks run directory must be named chunks_<id>: %s", runDir)
+	}
+	suffix := strings.TrimPrefix(runName, "chunks_")
+	if manifest.SourceRun != "run_"+suffix || manifest.SourceNormalization != "normalized_"+suffix {
+		return manifest, nil, nil, fmt.Errorf("chunks manifest lineage mismatch: expected run_%s and normalized_%s", suffix, suffix)
 	}
 	if len(manifest.Workspaces) == 0 {
-		return manifest, nil, nil, fmt.Errorf("normalization manifest contains no workspaces")
+		return manifest, nil, nil, fmt.Errorf("chunks manifest contains no workspaces")
 	}
 	ids, paths, collections := map[int]struct{}{}, map[string]struct{}{}, map[string]struct{}{}
 	resolved := make(map[int]workspacePaths, len(manifest.Workspaces))
 	for index, workspace := range manifest.Workspaces {
-		if workspace.ID <= 0 || strings.TrimSpace(workspace.Name) == "" || strings.TrimSpace(workspace.Path) == "" || strings.TrimSpace(workspace.QdrantCollection) == "" {
+		if workspace.ID <= 0 || strings.TrimSpace(workspace.Name) == "" || workspace.Path != fmt.Sprintf("workspace_%d", workspace.ID) || strings.TrimSpace(workspace.QdrantCollection) == "" || strings.TrimSpace(workspace.ReportPath) == "" {
 			return manifest, nil, nil, fmt.Errorf("workspace %d has invalid required fields", index+1)
 		}
-		if workspace.Status != "complete" && workspace.Status != "complete_with_warnings" && workspace.Status != "failed" {
+		if workspace.Status != "complete" && workspace.Status != "failed" {
 			return manifest, nil, nil, fmt.Errorf("workspace %d has invalid status %q", workspace.ID, workspace.Status)
 		}
 		if workspace.Errors < 0 {
 			return manifest, nil, nil, fmt.Errorf("workspace %d has invalid errors count", workspace.ID)
 		}
+		expectedReportPath := filepath.ToSlash(filepath.Join(workspace.Path, "chunk_report.json"))
+		if workspace.ReportPath != expectedReportPath {
+			return manifest, nil, nil, fmt.Errorf("workspace %d reportPath must be %s", workspace.ID, expectedReportPath)
+		}
 		workspaceDir, err := resolveWithin(runDir, workspace.Path)
 		if err != nil {
 			return manifest, nil, nil, fmt.Errorf("workspace %d path: %w", workspace.ID, err)
 		}
-		normalizedPath, _ := filepath.Rel(runDir, workspaceDir)
+		normalizedPath := filepath.Clean(filepath.FromSlash(workspace.Path))
 		if _, found := ids[workspace.ID]; found {
 			return manifest, nil, nil, fmt.Errorf("duplicate workspace id: %d", workspace.ID)
 		}
@@ -159,9 +174,21 @@ func validateRun(runDir string) (normalizationManifest, []manifestWorkspace, map
 		ids[workspace.ID] = struct{}{}
 		paths[normalizedPath] = struct{}{}
 		collections[workspace.QdrantCollection] = struct{}{}
-		workspaceFiles := workspacePaths{
-			chunks: filepath.Join(workspaceDir, "chunks.jsonl"), chunkReport: filepath.Join(workspaceDir, "chunk_report.json"),
-			indexReport: filepath.Join(workspaceDir, "index-report."+safeCollectionName(workspace.QdrantCollection)+".json"),
+		chunkReport, err := resolveWithin(runDir, workspace.ReportPath)
+		if err != nil {
+			return manifest, nil, nil, fmt.Errorf("workspace %d reportPath: %w", workspace.ID, err)
+		}
+		workspaceFiles := workspacePaths{chunkReport: chunkReport, indexReport: filepath.Join(workspaceDir, "index-report."+safeCollectionName(workspace.QdrantCollection)+".json")}
+		if workspace.Status == "complete" && workspace.Errors == 0 {
+			expectedChunksPath := filepath.ToSlash(filepath.Join(workspace.Path, "chunks.jsonl"))
+			if workspace.ChunksPath != expectedChunksPath {
+				return manifest, nil, nil, fmt.Errorf("workspace %d chunksPath must be %s", workspace.ID, expectedChunksPath)
+			}
+			chunks, err := resolveWithin(runDir, workspace.ChunksPath)
+			if err != nil {
+				return manifest, nil, nil, fmt.Errorf("workspace %d chunksPath: %w", workspace.ID, err)
+			}
+			workspaceFiles.chunks = chunks
 		}
 		resolved[workspace.ID] = workspaceFiles
 		if workspace.Status == "failed" || workspace.Errors > 0 {
@@ -221,9 +248,14 @@ func resolveWithin(root, value string) (string, error) {
 }
 
 func completeWorkspace(workspace manifestWorkspace, paths workspacePaths, runDir string, report Report) RunWorkspaceReport {
-	input, reportPath := filepath.ToSlash(relativeOrValue(runDir, paths.chunks)), filepath.ToSlash(relativeOrValue(runDir, paths.indexReport))
+	var input *string
+	if paths.chunks != "" {
+		value := filepath.ToSlash(relativeOrValue(runDir, paths.chunks))
+		input = &value
+	}
+	reportPath := filepath.ToSlash(relativeOrValue(runDir, paths.indexReport))
 	return RunWorkspaceReport{WorkspaceID: workspace.ID, WorkspaceName: workspace.Name, WorkspacePath: workspace.Path,
-		Collection: workspace.QdrantCollection, Status: "complete", InputFile: &input, ReportFile: &reportPath,
+		Collection: workspace.QdrantCollection, Status: "complete", InputFile: input, ReportFile: &reportPath,
 		InputChunks: report.InputChunks, EmbeddedChunks: report.EmbeddedChunks, PayloadOnlyUpdates: report.PayloadOnlyUpdates,
 		SkippedUnchanged: report.SkippedUnchanged, StaleChunksFound: report.StaleChunksFound,
 		DeletedChunks: report.DeletedChunks, FailedChunks: report.FailedChunks}

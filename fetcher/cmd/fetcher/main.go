@@ -116,7 +116,7 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	var qdrantTimeout, teiTimeout time.Duration
 	var batchSize int
 	var dryRun, forceReembed, prune, continueOnError bool
-	flags.StringVar(&runDirectory, "run", "", "normalized run directory")
+	flags.StringVar(&runDirectory, "run", "", "chunks_<id> run directory")
 	flags.StringVar(&input, "input", "", "single chunks.jsonl file")
 	flags.StringVar(&collection, "collection", envString("QDRANT_COLLECTION", indexer.DefaultCollection), "Qdrant collection for single-file mode")
 	flags.StringVar(&reportFile, "report", "", "output report path")
@@ -375,6 +375,6 @@ func printUsage(writer io.Writer) {
 	fmt.Fprintln(writer, "  fetcher workspaces list")
 	fmt.Fprintln(writer, "  fetcher fetch --out <directory> [--include IDs] [--exclude IDs] [--skip-assets]")
 	fmt.Fprintln(writer, "  fetcher normalize --run <run_directory> --out <directory> [--include IDs] [--exclude IDs] [--short-note-threshold N] [--force]")
-	fmt.Fprintln(writer, "  fetcher index --run <normalized_run> [--dry-run] [--force-reembed] [--continue-on-error]")
+	fmt.Fprintln(writer, "  fetcher index --run <chunks_run> [--dry-run] [--force-reembed] [--continue-on-error]")
 	fmt.Fprintln(writer, "  fetcher index --input <chunks.jsonl> --collection <name> [--prune] [--dry-run]")
 }

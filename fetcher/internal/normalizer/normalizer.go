@@ -674,6 +674,14 @@ func validatePaths(runValue, outputValue string) (string, string, error) {
 	if err != nil || !info.IsDir() {
 		return "", "", fmt.Errorf("source run does not exist or is not a directory: %s", runDir)
 	}
+	runName := filepath.Base(runDir)
+	if !strings.HasPrefix(runName, "run_") || len(runName) == len("run_") {
+		return "", "", fmt.Errorf("source directory must be named run_<id>: %s", runDir)
+	}
+	expectedOutput := "normalized_" + strings.TrimPrefix(runName, "run_")
+	if filepath.Base(outputDir) != expectedOutput {
+		return "", "", fmt.Errorf("normalization output directory must be named %s: %s", expectedOutput, outputDir)
+	}
 	if pathsOverlap(runDir, outputDir) {
 		return "", "", errors.New("source run and output directory must not contain one another")
 	}
