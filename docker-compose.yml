@@ -1,6 +1,6 @@
 services:
   qdrant:
-    image: qdrant/qdrant:${QDRANT_VERSION:-v1.18.2}
+    image: qdrant/qdrant:v1.19.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
@@ -31,16 +31,17 @@ services:
       start_period: 10s
 
   embeddings:
-    image: ${TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07}
-    platform: ${TEI_PLATFORM:-linux/amd64}
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.3@sha256:c26a226262ad4ff3330fb30b76653c1bb65da2fcf413b92284545a010e0a8a48
+    platform: linux/amd64
     restart: unless-stopped
     ports:
       - "127.0.0.1:${TEI_PORT:-8080}:80"
     environment:
-      MODEL_ID: ${TEI_MODEL_ID:-Xenova/multilingual-e5-small}
-      REVISION: ${TEI_MODEL_REVISION:-761b726dd34fb83930e26aab4e9ac3899aa1fa78}
-      POOLING: ${TEI_POOLING:-mean}
-      AUTO_TRUNCATE: ${TEI_AUTO_TRUNCATE:-false}
+      MODEL_ID: ${EMBEDDING_MODEL_ID:?EMBEDDING_MODEL_ID is required}
+      REVISION: ${EMBEDDING_MODEL_REVISION:?EMBEDDING_MODEL_REVISION is required}
+      DTYPE: ${EMBEDDING_DTYPE:?EMBEDDING_DTYPE is required}
+      POOLING: ${EMBEDDING_POOLING:?EMBEDDING_POOLING is required}
+      AUTO_TRUNCATE: ${EMBEDDING_AUTO_TRUNCATE:?EMBEDDING_AUTO_TRUNCATE is required}
       HUGGINGFACE_HUB_CACHE: /data
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:
@@ -69,6 +70,18 @@ services:
       HTTP_ADDR: :8080
       TEI_URL: http://embeddings:80
       TEI_TIMEOUT: ${TEI_TIMEOUT:-10s}
+      EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:?EMBEDDING_MODEL_ID is required}
+      EMBEDDING_MODEL_REVISION: ${EMBEDDING_MODEL_REVISION:?EMBEDDING_MODEL_REVISION is required}
+      EMBEDDING_DIMENSION: ${EMBEDDING_DIMENSION:?EMBEDDING_DIMENSION is required}
+      EMBEDDING_DTYPE: ${EMBEDDING_DTYPE:?EMBEDDING_DTYPE is required}
+      EMBEDDING_POOLING: ${EMBEDDING_POOLING:?EMBEDDING_POOLING is required}
+      EMBEDDING_NORMALIZED: ${EMBEDDING_NORMALIZED:?EMBEDDING_NORMALIZED is required}
+      EMBEDDING_DOCUMENT_PREFIX: ${EMBEDDING_DOCUMENT_PREFIX?EMBEDDING_DOCUMENT_PREFIX must be set}
+      EMBEDDING_QUERY_PREFIX: ${EMBEDDING_QUERY_PREFIX:?EMBEDDING_QUERY_PREFIX is required}
+      EMBEDDING_MAX_INPUT_TOKENS: ${EMBEDDING_MAX_INPUT_TOKENS:?EMBEDDING_MAX_INPUT_TOKENS is required}
+      EMBEDDING_AUTO_TRUNCATE: ${EMBEDDING_AUTO_TRUNCATE:?EMBEDDING_AUTO_TRUNCATE is required}
+      EMBEDDING_PIPELINE_VERSION: ${EMBEDDING_PIPELINE_VERSION:?EMBEDDING_PIPELINE_VERSION is required}
+      EMBEDDING_POINT_NAMESPACE: ${EMBEDDING_POINT_NAMESPACE:?EMBEDDING_POINT_NAMESPACE is required}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-methodology_e5_small_v1}
@@ -130,7 +143,11 @@ services:
       rag-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:$${PORT}/health/live >/dev/null || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:$${PORT}/health/live >/dev/null || exit 1",
+        ]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -150,7 +167,11 @@ services:
       rag-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O - http://127.0.0.1:8080/healthz >/dev/null || exit 1",
+        ]
       interval: 10s
       timeout: 3s
       retries: 6
@@ -178,7 +199,11 @@ services:
       bot:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "test -s /etc/nginx/ssl/le-crt.pem && nginx -t >/dev/null 2>&1 || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "test -s /etc/nginx/ssl/le-crt.pem && nginx -t >/dev/null 2>&1 || exit 1",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3

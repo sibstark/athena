@@ -13,9 +13,9 @@ bun run chunk -- \
 
 Имена обязаны образовывать одну цепочку: `run_<id> → normalized_<id> → chunks_<id>`. В `chunks_<id>` создаются `chunks_manifest.json`, общий `chunks_report.json` и отдельные `workspace_<id>/chunks.jsonl` с `chunk_report.json`.
 
-Chunker использует только закреплённый `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. `tokenizer.json` и `tokenizer_config.json` читаются напрямую из общего кеша и проверяются по SHA-256; сетевого fallback нет. Путь задаётся через `--tokenizer-cache`, `EMBEDDING_CACHE_DIR` или по умолчанию `../var/models`.
+Model ID, revision, SHA-256 токенизатора и chunk limits обязательны в корневом `.env`. `tokenizer.json` и `tokenizer_config.json` читаются из общего кеша и каждый раз проверяются по SHA-256; сетевого fallback во время chunk run нет. Явная подготовка кеша выполняется командой `bun run tokenizer:cache`. Путь задаётся через `--tokenizer-cache`, `EMBEDDING_CACHE_DIR` или `../var/models`.
 
-Каждый `embedding_text` проверяется тем же токенизатором и не может превышать `maxTokens` (по умолчанию 450). Длинные атомарные значения, строки таблиц, code- и HTML-блоки принудительно делятся, поэтому indexer не получает входы длиннее лимита embedding-модели.
+Текущие обязательные лимиты: target 700, max 900, min 80 и overlap 100 токенов. Каждый `embedding_text` проверяется тем же закреплённым токенизатором и не может превышать `CHUNK_MAX_TOKENS`. Длинные атомарные значения, строки таблиц, code- и HTML-блоки принудительно делятся.
 
 Каждый chunk сохраняет точный `metadata.document_url` из normalized document. Значение обязано быть абсолютным HTTP(S)-URL и далее используется как ссылка на исходный документ Bitrix в Qdrant и RAG API.
 

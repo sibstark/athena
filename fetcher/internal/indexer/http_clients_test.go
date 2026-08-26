@@ -19,11 +19,12 @@ func TestTEIClientExactContract(t *testing.T) {
 			writer.WriteHeader(http.StatusOK)
 			_, _ = writer.Write([]byte("{}"))
 		case "/info":
-			_ = json.NewEncoder(writer).Encode(map[string]any{"model_id": DefaultModel, "model_sha": DefaultModelRevision, "max_input_length": 512, "auto_truncate": false, "max_batch_requests": 4})
+			contract := testContract()
+			_ = json.NewEncoder(writer).Encode(map[string]any{"model_id": contract.ModelID, "model_sha": contract.Revision, "model_dtype": contract.DType, "max_input_length": contract.MaxInputTokens, "auto_truncate": contract.AutoTruncate, "max_batch_requests": 4})
 		case "/tokenize":
 			var body map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&body)
-			if body["inputs"] != "passage: hello" || body["add_special_tokens"] != true {
+			if body["inputs"] != "hello" || body["add_special_tokens"] != true {
 				t.Errorf("tokenize body = %#v", body)
 			}
 			_ = json.NewEncoder(writer).Encode([]int{1, 2, 3})
@@ -39,15 +40,15 @@ func TestTEIClientExactContract(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := NewTEIClient(server.URL, time.Second)
+	client := NewTEIClient(server.URL, time.Second, testContract())
 	if err := client.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	count, err := client.CountTokens(context.Background(), "passage: hello")
+	count, err := client.CountTokens(context.Background(), "hello")
 	if err != nil || count != 3 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
-	vectors, err := client.EmbedDocuments(context.Background(), []string{"passage: hello"})
+	vectors, err := client.EmbedDocuments(context.Background(), []string{"hello"})
 	if err != nil || len(vectors) != 1 {
 		t.Fatalf("vectors=%d err=%v", len(vectors), err)
 	}
@@ -80,8 +81,8 @@ func TestQdrantVectorReuseRequiresTEIBackend(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewQdrantClient(server.URL, "secret", time.Second)
-	vector, err := client.FindVector(context.Background(), "collection", VectorLookup{EmbeddingInputHash: "hash", Pipeline: pipeline("1")})
-	if err != nil || len(vector) != DefaultDimension {
+	vector, err := client.FindVector(context.Background(), "collection", VectorLookup{EmbeddingInputHash: "hash", Pipeline: pipeline(testContract())})
+	if err != nil || len(vector) != testContract().Dimension {
 		t.Fatalf("vector=%d err=%v", len(vector), err)
 	}
 }
@@ -98,10 +99,10 @@ func TestQdrantCollectionCreationContract(t *testing.T) {
 			_ = json.NewDecoder(request.Body).Decode(&body)
 			vectors := body["vectors"].(map[string]any)
 			metadata := body["metadata"].(map[string]any)
-			if vectors["size"] != float64(DefaultDimension) || vectors["distance"] != "Cosine" {
+			if vectors["size"] != float64(testContract().Dimension) || vectors["distance"] != "Cosine" {
 				t.Errorf("vectors = %#v", vectors)
 			}
-			if metadata["embedding_model"] != DefaultModel || metadata["point_namespace"] != PointIDNamespace {
+			if metadata["embedding_model"] != testContract().ModelID || metadata["point_namespace"] != testContract().PointNamespace {
 				t.Errorf("metadata = %#v", metadata)
 			}
 			created = true
@@ -112,7 +113,7 @@ func TestQdrantCollectionCreationContract(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewQdrantClient(server.URL, "", time.Second)
-	state, err := client.EnsureCollection(context.Background(), "test", DefaultDimension, "Cosine", pipeline("1"), false)
+	state, err := client.EnsureCollection(context.Background(), "test", testContract().Dimension, "Cosine", pipeline(testContract()), false)
 	if err != nil {
 		t.Fatal(err)
 	}

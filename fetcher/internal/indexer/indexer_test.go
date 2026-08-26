@@ -10,7 +10,7 @@ import (
 )
 
 func TestPointIDGolden(t *testing.T) {
-	id, err := pointID("chunk_example")
+	id, err := pointID("chunk_example", testContract().PointNamespace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,14 +21,14 @@ func TestPointIDGolden(t *testing.T) {
 
 func TestBuildPayloadGoldenAndBackend(t *testing.T) {
 	chunk := testChunk("one", "chunk_example")
-	payload, err := buildPayload(chunk, hashText("passage: one"), pipeline("1"), false)
+	payload, err := buildPayload(chunk, hashText("one"), pipeline(testContract()), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if payload["embedding_backend"] != "tei" {
 		t.Fatalf("backend = %#v", payload["embedding_backend"])
 	}
-	if payload["payload_hash"] != "8fe3519d2af83213df3b70815650ec6644b4b19d779322e39dd3d65da25266e4" {
+	if payload["payload_hash"] != "fdba8fd03901e5f553fa69988d62c7d6fe595d73ece3bfe2149da7c7fc33e4d7" {
 		t.Fatalf("payload hash changed: %v", payload["payload_hash"])
 	}
 }
@@ -37,7 +37,7 @@ func TestBuildPayloadIncludesDocumentURL(t *testing.T) {
 	documentURL := "https://hwschool.bitrix24.ru/note/document/3515/"
 	chunk := testChunk("one", "chunk_example")
 	chunk.Metadata.DocumentURL = &documentURL
-	payload, err := buildPayload(chunk, hashText("passage: one"), pipeline("1"), false)
+	payload, err := buildPayload(chunk, hashText("one"), pipeline(testContract()), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func testConfig(t *testing.T, chunks []ChunkRecord) Config {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return Config{InputFile: input, ReportFile: filepath.Join(root, "report.json"), Collection: "test", BatchSize: 2, PipelineVersion: "1", VectorCacheSize: 8, Prune: false}
+	return Config{Contract: testContract(), InputFile: input, ReportFile: filepath.Join(root, "report.json"), Collection: "test", BatchSize: 2, VectorCacheSize: 8, Prune: false}
 }
 
 type fakeProvider struct {
@@ -295,9 +295,18 @@ func (provider *fakeProvider) EmbedDocuments(_ context.Context, inputs []string)
 	return result, nil
 }
 func unitVector() []float64 {
-	vector := make([]float64, DefaultDimension)
+	vector := make([]float64, testContract().Dimension)
 	vector[0] = 1
 	return vector
+}
+
+func testContract() EmbeddingContract {
+	return EmbeddingContract{
+		ModelID: "test/model", Revision: "test-revision", Dimension: 8, DType: "float32",
+		Pooling: "cls", Normalized: true, DocumentPrefix: "", QueryPrefix: "query: ",
+		MaxInputTokens: 8192, AutoTruncate: false, PipelineVersion: "2",
+		PointNamespace: "a1f0e7c2-7a6b-5c74-9f3e-6c8d91b3a204",
+	}
 }
 
 type fakeStore struct {

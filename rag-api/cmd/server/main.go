@@ -38,8 +38,8 @@ func run() error {
 	}
 	logger := observability.NewLogger(cfg.LogLevel)
 	metrics := observability.NewMetrics()
-	teiClient := tei.New(cfg.TEIURL, cfg.TEITimeout, func(d time.Duration, e error) { metrics.Observe("tei", d, e) })
-	qdrantClient := qdrant.New(cfg.QdrantURL, cfg.QdrantAPIKey, cfg.QdrantCollection, cfg.QdrantTimeout, func(d time.Duration, e error) { metrics.Observe("qdrant", d, e) })
+	teiClient := tei.New(cfg.TEIURL, cfg.TEITimeout, cfg.Embedding, func(d time.Duration, e error) { metrics.Observe("tei", d, e) })
+	qdrantClient := qdrant.New(cfg.QdrantURL, cfg.QdrantAPIKey, cfg.QdrantCollection, cfg.QdrantTimeout, cfg.Embedding, func(d time.Duration, e error) { metrics.Observe("qdrant", d, e) })
 	deepSeekClient := deepseek.New(deepseek.Options{BaseURL: cfg.DeepSeekBaseURL, APIKey: cfg.DeepSeekAPIKey, Model: cfg.DeepSeekModel, Timeout: cfg.DeepSeekTimeout, MaxTokens: cfg.DeepSeekMaxOutputTokens, Thinking: cfg.DeepSeekThinkingEnabled, MaxConcurrency: cfg.DeepSeekMaxConcurrency, Observe: func(d time.Duration, e error) { metrics.Observe("deepseek", d, e) }, OnRetry: metrics.Retry})
 	retriever := retrieval.New(teiClient, qdrantClient, cfg.MaxTopK)
 	api := httpapi.New(cfg, retriever, deepSeekClient, teiClient, qdrantClient, metrics, logger)

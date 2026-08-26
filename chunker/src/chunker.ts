@@ -21,11 +21,8 @@ import {
   containsForbiddenControlCharacters,
   sanitizeControlCharacters,
 } from "./text.js";
-import {
-  createE5TokenCounter,
-  DEFAULT_TOKENIZER,
-  DEFAULT_TOKENIZER_REVISION,
-} from "./e5-token-counter.js";
+import { loadChunkEmbeddingConfig } from "./embedding-config.js";
+import { createPinnedTokenCounter } from "./token-counter.js";
 
 export interface TokenCounter {
   readonly name: string;
@@ -190,13 +187,7 @@ interface MarkdownSection {
 }
 
 type BlockKind =
-  | "heading"
-  | "rule"
-  | "paragraph"
-  | "list_item"
-  | "table"
-  | "code"
-  | "html";
+  "heading" | "rule" | "paragraph" | "list_item" | "table" | "code" | "html";
 
 interface MarkdownBlock {
   kind: BlockKind;
@@ -236,11 +227,6 @@ interface SyntaxNode {
   children?: SyntaxNode[];
 }
 
-const DEFAULT_TARGET_TOKENS = 320;
-const DEFAULT_MAX_TOKENS = 450;
-const DEFAULT_MIN_TOKENS = 80;
-const DEFAULT_OVERLAP_TOKENS = 50;
-
 export async function chunkNormalizedDocuments(
   options: ChunkOptions,
 ): Promise<ChunkingResult> {
@@ -250,10 +236,20 @@ export async function chunkNormalizedDocuments(
   const reportFile = resolve(
     options.reportFile ?? join(dirname(outputFile), "chunk_report.json"),
   );
-  const targetTokens = options.targetTokens ?? DEFAULT_TARGET_TOKENS;
-  const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
-  const minTokens = options.minTokens ?? DEFAULT_MIN_TOKENS;
-  const overlapTokens = options.overlapTokens ?? DEFAULT_OVERLAP_TOKENS;
+  if (
+    options.targetTokens === undefined ||
+    options.maxTokens === undefined ||
+    options.minTokens === undefined ||
+    options.overlapTokens === undefined
+  ) {
+    throw new Error(
+      "Chunk token limits are required; load them from the root .env in the CLI.",
+    );
+  }
+  const targetTokens = options.targetTokens;
+  const maxTokens = options.maxTokens;
+  const minTokens = options.minTokens;
+  const overlapTokens = options.overlapTokens;
   const tokenCounter = memoizeTokenCounter(
     options.tokenCounter ?? (await createDefaultTokenCounter(options)),
   );
@@ -268,7 +264,10 @@ export async function chunkNormalizedDocuments(
   }
   await requireFile(inputFile, "Normalized JSONL");
   await requireFile(treeFile, "Document tree");
-  await assertTargetsAvailable([outputFile, reportFile], Boolean(options.force));
+  await assertTargetsAvailable(
+    [outputFile, reportFile],
+    Boolean(options.force),
+  );
 
   const tree = parseTree(await readFile(treeFile, "utf8"));
   const nodes = validateTree(tree);
@@ -303,7 +302,9 @@ export async function chunkNormalizedDocuments(
           source: document.metadata.source,
           reason: skipReason,
         });
-        log(`[${report.input_documents}] skipped: ${document.document_id}: ${skipReason}`);
+        log(
+          `[${report.input_documents}] skipped: ${document.document_id}: ${skipReason}`,
+        );
         continue;
       }
 
@@ -335,7 +336,13 @@ export async function chunkNormalizedDocuments(
           tokenCounter,
         },
       );
-      validateDocumentChunks(document, documentChunks, tokenCounter, maxTokens, nodes);
+      validateDocumentChunks(
+        document,
+        documentChunks,
+        tokenCounter,
+        maxTokens,
+        nodes,
+      );
       chunks.push(...documentChunks);
       report.processed_documents += 1;
       log(
@@ -357,25 +364,38 @@ export async function chunkNormalizedDocuments(
   annotateChunkDuplicates(chunks, report);
   validateGlobalChunks(chunks);
   finalizeReport(report, chunks);
-  await writeResults({ outputFile, reportFile, chunks, report, force: Boolean(options.force) });
+  await writeResults({
+    outputFile,
+    reportFile,
+    chunks,
+    report,
+    force: Boolean(options.force),
+  });
   return { outputFile, reportFile, report };
 }
 
-async function createDefaultTokenCounter(options: ChunkOptions): Promise<TokenCounter> {
-  if (options.tokenizer === "unicode-heuristic-v1") return new UnicodeHeuristicTokenCounter();
-  const modelId = options.tokenizer ?? process.env.EMBEDDING_MODEL?.trim() ?? DEFAULT_TOKENIZER;
-  return createE5TokenCounter({
-    modelId,
-    revision:
-      options.tokenizerRevision ??
-      process.env.EMBEDDING_MODEL_REVISION?.trim() ??
-      DEFAULT_TOKENIZER_REVISION,
+async function createDefaultTokenCounter(
+  options: ChunkOptions,
+): Promise<TokenCounter> {
+  if (options.tokenizer === "unicode-heuristic-v1")
+    return new UnicodeHeuristicTokenCounter();
+  const config = loadChunkEmbeddingConfig();
+  return createPinnedTokenCounter({
+    modelId: options.tokenizer ?? config.modelId,
+    revision: options.tokenizerRevision ?? config.revision,
+    tokenizerSha256: config.tokenizerSha256,
+    tokenizerConfigSha256: config.tokenizerConfigSha256,
     cacheDir:
-      options.tokenizerCacheDir ?? process.env.EMBEDDING_CACHE_DIR?.trim() ?? "../var/models",
+      options.tokenizerCacheDir ??
+      process.env.EMBEDDING_CACHE_DIR?.trim() ??
+      "../var/models",
   });
 }
 
-function memoizeTokenCounter(counter: TokenCounter, maxEntries = 20_000): TokenCounter {
+function memoizeTokenCounter(
+  counter: TokenCounter,
+  maxEntries = 20_000,
+): TokenCounter {
   const cache = new Map<string, number>();
   return {
     name: counter.name,
@@ -418,9 +438,12 @@ function chunkDocument(
       const content = joinUnits(group.units);
       if (!content.trim()) continue;
       const embeddingText = buildEmbeddingText(document, section, content);
-      const oversizedReason = group.units.find((unit) => unit.oversizedReason)
-        ?.oversizedReason;
-      const tableUnit = group.units.find((unit) => unit.tablePart !== undefined);
+      const oversizedReason = group.units.find(
+        (unit) => unit.oversizedReason,
+      )?.oversizedReason;
+      const tableUnit = group.units.find(
+        (unit) => unit.tablePart !== undefined,
+      );
       pending.push({
         section,
         content,
@@ -448,7 +471,12 @@ function chunkDocument(
     const occurrence = occurrenceByIdentity.get(identity) ?? 0;
     occurrenceByIdentity.set(identity, occurrence + 1);
     const chunkId = `chunk_${sha256(
-      JSON.stringify([document.document_id, headingIdentity, contentHash, occurrence]),
+      JSON.stringify([
+        document.document_id,
+        headingIdentity,
+        contentHash,
+        occurrence,
+      ]),
     )}`;
     const assets = extractAssets(item.content);
     const externalUrls = extractExternalUrls(item.content);
@@ -474,10 +502,16 @@ function chunkDocument(
       character_count: [...item.content].length,
       contains_table: item.containsTable,
       contains_code: item.containsCode,
-      oversized: tokenCount > options.maxTokens || item.oversizedReason !== undefined,
-      ...(item.oversizedReason ? { oversized_reason: item.oversizedReason } : {}),
+      oversized:
+        tokenCount > options.maxTokens || item.oversizedReason !== undefined,
+      ...(item.oversizedReason
+        ? { oversized_reason: item.oversizedReason }
+        : {}),
       ...(item.tablePart !== undefined
-        ? { table_part: item.tablePart, table_parts_total: item.tablePartsTotal ?? 1 }
+        ? {
+            table_part: item.tablePart,
+            table_parts_total: item.tablePartsTotal ?? 1,
+          }
         : {}),
       assets,
       external_urls: externalUrls,
@@ -567,7 +601,8 @@ function parseSections(markdown: string): MarkdownSection[] {
     else currentLines = [];
 
     const level = heading[1]?.length ?? 1;
-    const title = cleanHeadingText(heading[2] ?? "") || `Раздел ${sections.length + 1}`;
+    const title =
+      cleanHeadingText(heading[2] ?? "") || `Раздел ${sections.length + 1}`;
     while (headingStack.at(-1) && (headingStack.at(-1)?.level ?? 0) >= level) {
       headingStack.pop();
     }
@@ -580,7 +615,8 @@ function parseSections(markdown: string): MarkdownSection[] {
     };
     currentLines.push(...carriedLines, line);
   }
-  if (fence) throw new Error("Markdown contains an unclosed fenced code block.");
+  if (fence)
+    throw new Error("Markdown contains an unclosed fenced code block.");
   flush();
   return sections;
 }
@@ -590,7 +626,11 @@ function parseBlocks(content: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   let index = 0;
 
-  const append = (kind: BlockKind, start: number, endExclusive: number): void => {
+  const append = (
+    kind: BlockKind,
+    start: number,
+    endExclusive: number,
+  ): void => {
     let end = endExclusive;
     while (end < lines.length && lines[end]?.trim() === "") end += 1;
     blocks.push({ kind, raw: lines.slice(start, end).join("\n") });
@@ -600,7 +640,8 @@ function parseBlocks(content: string): MarkdownBlock[] {
   while (index < lines.length) {
     if (lines[index]?.trim() === "") {
       if (blocks.length > 0) {
-        blocks[blocks.length - 1]!.raw += `${blocks[blocks.length - 1]!.raw ? "\n" : ""}${lines[index]}`;
+        blocks[blocks.length - 1]!.raw +=
+          `${blocks[blocks.length - 1]!.raw ? "\n" : ""}${lines[index]}`;
       }
       index += 1;
       continue;
@@ -621,7 +662,11 @@ function parseBlocks(content: string): MarkdownBlock[] {
       append("code", start, index);
       continue;
     }
-    if (index + 1 < lines.length && isTableRow(line) && isTableDelimiter(lines[index + 1] ?? "")) {
+    if (
+      index + 1 < lines.length &&
+      isTableRow(line) &&
+      isTableDelimiter(lines[index + 1] ?? "")
+    ) {
       index += 2;
       while (index < lines.length && isTableRow(lines[index] ?? "")) index += 1;
       append("table", start, index);
@@ -639,10 +684,15 @@ function parseBlocks(content: string): MarkdownBlock[] {
       index += 1;
       while (index < lines.length) {
         const candidate = lines[index] ?? "";
-        if (isTopLevelListItem(candidate) || isBlockBoundary(lines, index)) break;
+        if (isTopLevelListItem(candidate) || isBlockBoundary(lines, index))
+          break;
         if (!candidate.trim()) {
           const next = nextNonBlankLine(lines, index + 1);
-          if (next === null || (!/^\s{2,}\S/u.test(lines[next] ?? "") && !isNestedListItem(lines[next] ?? ""))) {
+          if (
+            next === null ||
+            (!/^\s{2,}\S/u.test(lines[next] ?? "") &&
+              !isNestedListItem(lines[next] ?? ""))
+          ) {
             break;
           }
         }
@@ -659,7 +709,11 @@ function parseBlocks(content: string): MarkdownBlock[] {
     }
 
     index += 1;
-    while (index < lines.length && lines[index]?.trim() && !isBlockBoundary(lines, index)) {
+    while (
+      index < lines.length &&
+      lines[index]?.trim() &&
+      !isBlockBoundary(lines, index)
+    ) {
       index += 1;
     }
     append("paragraph", start, index);
@@ -679,7 +733,12 @@ function expandBlocks(
 ): ChunkUnit[] {
   const units: ChunkUnit[] = [];
   for (const block of blocks) {
-    const tokenCount = countCandidate(document, section, block.raw, options.tokenCounter);
+    const tokenCount = countCandidate(
+      document,
+      section,
+      block.raw,
+      options.tokenCounter,
+    );
     if (tokenCount <= options.maxTokens) {
       units.push({ ...block, overlapEligible: block.kind === "paragraph" });
       continue;
@@ -722,7 +781,10 @@ function splitListItem(
 
   for (const [lineIndex, line] of lines.entries()) {
     const listLine = lineIndex === 0 || isNestedListItem(line);
-    if (countCandidate(document, section, line, options.tokenCounter) <= options.maxTokens) {
+    if (
+      countCandidate(document, section, line, options.tokenCounter) <=
+      options.maxTokens
+    ) {
       units.push({
         kind: listLine ? "list_item" : "paragraph",
         raw: line,
@@ -743,14 +805,25 @@ function splitListItem(
 
   return units.length > 0
     ? units
-    : [{ kind: "list_item", raw, forceOwn: true, oversizedReason: "list_item" }];
+    : [
+        {
+          kind: "list_item",
+          raw,
+          forceOwn: true,
+          oversizedReason: "list_item",
+        },
+      ];
 }
 
 function splitTable(
   document: NormalizedDocument,
   section: MarkdownSection,
   block: MarkdownBlock,
-  options: { targetTokens: number; maxTokens: number; tokenCounter: TokenCounter },
+  options: {
+    targetTokens: number;
+    maxTokens: number;
+    tokenCounter: TokenCounter;
+  },
 ): ChunkUnit[] {
   const lines = trimBlankLines(block.raw).split("\n");
   const header = lines.slice(0, 2);
@@ -767,14 +840,25 @@ function splitTable(
   };
   for (const row of rows) {
     const rowCandidate = [...header, row].join("\n");
-    if (countCandidate(document, section, rowCandidate, options.tokenCounter) > options.maxTokens) {
+    if (
+      countCandidate(document, section, rowCandidate, options.tokenCounter) >
+      options.maxTokens
+    ) {
       flush();
-      parts.push(...splitContentToFit(document, section, rowCandidate, options));
+      parts.push(
+        ...splitContentToFit(document, section, rowCandidate, options),
+      );
       continue;
     }
     const candidate = [...header, ...currentRows, row].join("\n");
-    const candidateTokens = countCandidate(document, section, candidate, options.tokenCounter);
-    if (currentRows.length > 0 && candidateTokens > options.targetTokens) flush();
+    const candidateTokens = countCandidate(
+      document,
+      section,
+      candidate,
+      options.tokenCounter,
+    );
+    if (currentRows.length > 0 && candidateTokens > options.targetTokens)
+      flush();
     currentRows.push(row);
   }
   flush();
@@ -804,7 +888,10 @@ function splitParagraph(
   }
   const units: ChunkUnit[] = [];
   for (const sentence of sentences) {
-    if (countCandidate(document, section, sentence, options.tokenCounter) <= options.maxTokens) {
+    if (
+      countCandidate(document, section, sentence, options.tokenCounter) <=
+      options.maxTokens
+    ) {
       units.push({ kind: "paragraph", raw: sentence, overlapEligible: true });
     } else {
       units.push(...splitInlineAtoms(document, section, sentence, options));
@@ -824,23 +911,33 @@ function splitInlineAtoms(
   let current = "";
   const flush = (): void => {
     const value = current.trim();
-    if (value) units.push({ kind: "paragraph", raw: value, overlapEligible: true });
+    if (value)
+      units.push({ kind: "paragraph", raw: value, overlapEligible: true });
     current = "";
   };
   for (const atom of atoms) {
     const candidate = `${current}${atom}`;
-    if (current && countCandidate(document, section, candidate, options.tokenCounter) > options.maxTokens) {
+    if (
+      current &&
+      countCandidate(document, section, candidate, options.tokenCounter) >
+        options.maxTokens
+    ) {
       flush();
     }
-    if (countCandidate(document, section, atom.trim(), options.tokenCounter) > options.maxTokens) {
+    if (
+      countCandidate(document, section, atom.trim(), options.tokenCounter) >
+      options.maxTokens
+    ) {
       flush();
       units.push(
-        ...splitContentToFit(document, section, atom.trim(), options).map((part) => ({
-          kind: "paragraph" as const,
-          raw: part,
-          forceOwn: true,
-          overlapEligible: false,
-        })),
+        ...splitContentToFit(document, section, atom.trim(), options).map(
+          (part) => ({
+            kind: "paragraph" as const,
+            raw: part,
+            forceOwn: true,
+            overlapEligible: false,
+          }),
+        ),
       );
     } else {
       current += atom;
@@ -856,7 +953,12 @@ function splitHardBlock(
   block: MarkdownBlock,
   options: { maxTokens: number; tokenCounter: TokenCounter },
 ): ChunkUnit[] {
-  return splitContentToFit(document, section, trimBlankLines(block.raw), options).map((part) => ({
+  return splitContentToFit(
+    document,
+    section,
+    trimBlankLines(block.raw),
+    options,
+  ).map((part) => ({
     kind: block.kind,
     raw: part,
     forceOwn: true,
@@ -873,7 +975,10 @@ function splitContentToFit(
   let remaining = trimBlankLines(raw);
   const parts: string[] = [];
   while (remaining) {
-    if (countCandidate(document, section, remaining, options.tokenCounter) <= options.maxTokens) {
+    if (
+      countCandidate(document, section, remaining, options.tokenCounter) <=
+      options.maxTokens
+    ) {
       parts.push(remaining);
       break;
     }
@@ -885,7 +990,11 @@ function splitContentToFit(
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
       const candidate = characters.slice(0, middle).join("").trimEnd();
-      if (candidate && countCandidate(document, section, candidate, options.tokenCounter) <= options.maxTokens) {
+      if (
+        candidate &&
+        countCandidate(document, section, candidate, options.tokenCounter) <=
+          options.maxTokens
+      ) {
         fittingLength = middle;
         low = middle + 1;
       } else {
@@ -893,7 +1002,9 @@ function splitContentToFit(
       }
     }
     if (fittingLength === 0) {
-      throw new Error("Chunk context prefix exceeds maxTokens before document content is added.");
+      throw new Error(
+        "Chunk context prefix exceeds maxTokens before document content is added.",
+      );
     }
 
     let splitAt = fittingLength;
@@ -907,7 +1018,8 @@ function splitContentToFit(
     let part = characters.slice(0, splitAt).join("").trimEnd();
     while (
       part &&
-      countCandidate(document, section, part, options.tokenCounter) > options.maxTokens
+      countCandidate(document, section, part, options.tokenCounter) >
+        options.maxTokens
     ) {
       splitAt -= 1;
       part = characters.slice(0, splitAt).join("").trimEnd();
@@ -925,7 +1037,11 @@ function packUnits(
   document: NormalizedDocument,
   section: MarkdownSection,
   units: ChunkUnit[],
-  options: { targetTokens: number; maxTokens: number; tokenCounter: TokenCounter },
+  options: {
+    targetTokens: number;
+    maxTokens: number;
+    tokenCounter: TokenCounter;
+  },
 ): ChunkGroup[] {
   const groups: ChunkGroup[] = [];
   let current: ChunkUnit[] = [];
@@ -950,14 +1066,23 @@ function packUnits(
     }
     const currentContent = joinUnits(current);
     const candidateContent = joinUnits([...current, unit]);
-    const currentTokens = countCandidate(document, section, currentContent, options.tokenCounter);
+    const currentTokens = countCandidate(
+      document,
+      section,
+      currentContent,
+      options.tokenCounter,
+    );
     const candidateTokens = countCandidate(
       document,
       section,
       candidateContent,
       options.tokenCounter,
     );
-    if (currentTokens >= options.targetTokens || candidateTokens > options.maxTokens) flush();
+    if (
+      currentTokens >= options.targetTokens ||
+      candidateTokens > options.maxTokens
+    )
+      flush();
     current.push(unit);
   }
   flush();
@@ -967,22 +1092,40 @@ function packUnits(
 function applyOverlap(
   document: NormalizedDocument,
   groups: ChunkGroup[],
-  options: { overlapTokens: number; maxTokens: number; tokenCounter: TokenCounter },
+  options: {
+    overlapTokens: number;
+    maxTokens: number;
+    tokenCounter: TokenCounter;
+  },
 ): void {
   if (options.overlapTokens === 0 || groups.length < 2) return;
   for (let index = 1; index < groups.length; index += 1) {
     const previous = groups[index - 1];
     const current = groups[index];
-    if (!previous || !current || current.units.some((unit) => unit.forceOwn)) continue;
+    if (!previous || !current || current.units.some((unit) => unit.forceOwn))
+      continue;
     const suffix: ChunkUnit[] = [];
-    for (let unitIndex = previous.units.length - 1; unitIndex >= 0; unitIndex -= 1) {
+    for (
+      let unitIndex = previous.units.length - 1;
+      unitIndex >= 0;
+      unitIndex -= 1
+    ) {
       const unit = previous.units[unitIndex];
       if (!unit?.overlapEligible || unit.forceOwn) break;
       const candidate = [unit, ...suffix];
-      const bodyTokens = options.tokenCounter.count(embeddingBody(joinUnits(candidate), previous.section));
+      const bodyTokens = options.tokenCounter.count(
+        embeddingBody(joinUnits(candidate), previous.section),
+      );
       if (bodyTokens > options.overlapTokens) break;
       const withCurrent = joinUnits([...candidate, ...current.units]);
-      if (countCandidate(document, current.section, withCurrent, options.tokenCounter) > options.maxTokens) {
+      if (
+        countCandidate(
+          document,
+          current.section,
+          withCurrent,
+          options.tokenCounter,
+        ) > options.maxTokens
+      ) {
         break;
       }
       suffix.unshift({ ...unit });
@@ -996,12 +1139,16 @@ function buildEmbeddingText(
   section: MarkdownSection,
   content: string,
 ): string {
-  const context = document.metadata.context_text || document.metadata.breadcrumbs.join(" → ");
+  const context =
+    document.metadata.context_text || document.metadata.breadcrumbs.join(" → ");
   const headingPath = dedupeAdjacent(section.headingPath);
   const prefix: string[] = [];
   if (context) prefix.push(`Путь: ${context}`);
-  if (document.metadata.title) prefix.push(`Документ: ${document.metadata.title}`);
-  prefix.push(`Раздел: ${headingPath.length > 0 ? headingPath.join(" → ") : "Преамбула"}`);
+  if (document.metadata.title)
+    prefix.push(`Документ: ${document.metadata.title}`);
+  prefix.push(
+    `Раздел: ${headingPath.length > 0 ? headingPath.join(" → ") : "Преамбула"}`,
+  );
   const body = embeddingBody(content, section);
   return `${prefix.join("\n")}\n\n${body}`.trim();
 }
@@ -1045,8 +1192,12 @@ function embeddingBody(content: string, section: MarkdownSection): string {
     );
     transformed = transformed.replace(
       /(?<!!)\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))(?:\s+["'][^"']*["'])?\)/gu,
-      (_match, label: string, angleUrl: string | undefined, plainUrl: string | undefined) =>
-        label.trim() || angleUrl || plainUrl || "",
+      (
+        _match,
+        label: string,
+        angleUrl: string | undefined,
+        plainUrl: string | undefined,
+      ) => label.trim() || angleUrl || plainUrl || "",
     );
     output.push(transformed);
   }
@@ -1059,7 +1210,10 @@ function extractAssets(content: string): NormalizedAsset[] {
   for (const match of content.matchAll(
     /!\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))(?:\s+["'][^"']*["'])?\)/gu,
   )) {
-    const path = decodeHtmlEntities(match[2] ?? match[3] ?? "").replace(/\\/gu, "/");
+    const path = decodeHtmlEntities(match[2] ?? match[3] ?? "").replace(
+      /\\/gu,
+      "/",
+    );
     if (!path) continue;
     const identity = `${path}\u001e${match[1] ?? ""}`;
     if (seen.has(identity)) continue;
@@ -1074,7 +1228,10 @@ function extractExternalUrls(content: string): string[] {
   const seen = new Set<string>();
   for (const match of content.matchAll(/https?:\/\/[^\s<>"'`]+/giu)) {
     let url = decodeHtmlEntities(match[0]).replace(/[.,;:!?]+$/gu, "");
-    while (url.endsWith(")") && countCharacter(url, ")") > countCharacter(url, "(")) {
+    while (
+      url.endsWith(")") &&
+      countCharacter(url, ")") > countCharacter(url, "(")
+    ) {
       url = url.slice(0, -1);
     }
     url = url.replace(/\]+$/gu, "");
@@ -1126,9 +1283,14 @@ function countCandidate(
 function cleanHeadingText(value: string): string {
   try {
     const tree = unified().use(remarkParse).parse(`# ${value}`) as SyntaxNode;
-    return syntaxText(tree.children?.[0] ?? {}).replace(/\s+/gu, " ").trim();
+    return syntaxText(tree.children?.[0] ?? {})
+      .replace(/\s+/gu, " ")
+      .trim();
   } catch {
-    return value.replace(/[*_~`]/gu, "").replace(/\s+/gu, " ").trim();
+    return value
+      .replace(/[*_~`]/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
   }
 }
 
@@ -1143,13 +1305,18 @@ function normalizedHeadingIdentity(path: string[]): string {
 }
 
 function normalizeIdentity(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("ru-RU").replace(/\s+/gu, " ").trim();
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("ru-RU")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function dedupeAdjacent(values: string[]): string[] {
   const output: string[] = [];
   for (const value of values) {
-    if (normalizeIdentity(output.at(-1) ?? "") !== normalizeIdentity(value)) output.push(value);
+    if (normalizeIdentity(output.at(-1) ?? "") !== normalizeIdentity(value))
+      output.push(value);
   }
   return output;
 }
@@ -1158,7 +1325,11 @@ function isBlockBoundary(lines: string[], index: number): boolean {
   const line = lines[index] ?? "";
   if (/^ {0,3}(?:#{1,6}[ \t]+|`{3,}|~{3,})/u.test(line)) return true;
   if (isThematicBreak(line) || isTopLevelListItem(line)) return true;
-  if (index + 1 < lines.length && isTableRow(line) && isTableDelimiter(lines[index + 1] ?? "")) {
+  if (
+    index + 1 < lines.length &&
+    isTableRow(line) &&
+    isTableDelimiter(lines[index + 1] ?? "")
+  ) {
     return true;
   }
   return /^ {0,3}<[/!?A-Za-z][^>]*>/u.test(line);
@@ -1175,7 +1346,9 @@ function isTableRow(line: string): boolean {
 function isTableDelimiter(line: string): boolean {
   const trimmed = line.trim().replace(/^\||\|$/gu, "");
   const cells = trimmed.split("|");
-  return cells.length > 0 && cells.every((cell) => /^\s*:?-{3,}:?\s*$/u.test(cell));
+  return (
+    cells.length > 0 && cells.every((cell) => /^\s*:?-{3,}:?\s*$/u.test(cell))
+  );
 }
 
 function isTopLevelListItem(line: string): boolean {
@@ -1200,7 +1373,8 @@ function trimBlankLines(value: string): string {
 function documentSkipReason(
   document: NormalizedDocument,
 ): ChunkingSkip["reason"] | null {
-  if (document.metadata.document_type === "external_link") return "external_link";
+  if (document.metadata.document_type === "external_link")
+    return "external_link";
   if (!document.metadata.indexable) return "indexable_false";
   if (!document.content.trim()) return "empty_content";
   return null;
@@ -1211,22 +1385,31 @@ function parseNormalizedDocument(line: string): NormalizedDocument {
   try {
     value = JSON.parse(line);
   } catch (error) {
-    throw new Error(`Invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   if (!isRecord(value)) throw new Error("A JSONL line must contain an object.");
   if (typeof value.document_id !== "string" || !value.document_id) {
     throw new Error("document_id must be a non-empty string.");
   }
-  if (value.parent_document_id !== null && typeof value.parent_document_id !== "string") {
+  if (
+    value.parent_document_id !== null &&
+    typeof value.parent_document_id !== "string"
+  ) {
     throw new Error("parent_document_id must be a string or null.");
   }
-  if (typeof value.content !== "string") throw new Error("content must be a string.");
+  if (typeof value.content !== "string")
+    throw new Error("content must be a string.");
   if (!isRecord(value.metadata)) throw new Error("metadata must be an object.");
   const metadata = value.metadata;
   if (typeof metadata.source !== "string" || !metadata.source) {
     throw new Error("metadata.source must be a non-empty string.");
   }
-  if (typeof metadata.document_url !== "string" || !metadata.document_url.trim()) {
+  if (
+    typeof metadata.document_url !== "string" ||
+    !metadata.document_url.trim()
+  ) {
     throw new Error("metadata.document_url must be a non-empty string.");
   }
   try {
@@ -1240,10 +1423,16 @@ function parseNormalizedDocument(line: string): NormalizedDocument {
   if (typeof metadata.indexable !== "boolean") {
     throw new Error("metadata.indexable must be a boolean.");
   }
-  if (!Array.isArray(metadata.ancestor_ids) || !metadata.ancestor_ids.every(isString)) {
+  if (
+    !Array.isArray(metadata.ancestor_ids) ||
+    !metadata.ancestor_ids.every(isString)
+  ) {
     throw new Error("metadata.ancestor_ids must be a string array.");
   }
-  if (!Array.isArray(metadata.breadcrumbs) || !metadata.breadcrumbs.every(isString)) {
+  if (
+    !Array.isArray(metadata.breadcrumbs) ||
+    !metadata.breadcrumbs.every(isString)
+  ) {
     throw new Error("metadata.breadcrumbs must be a string array.");
   }
   for (const field of ["depth"] as const) {
@@ -1252,7 +1441,8 @@ function parseNormalizedDocument(line: string): NormalizedDocument {
     }
   }
   for (const field of ["language", "status", "document_type"] as const) {
-    if (typeof metadata[field] !== "string") throw new Error(`metadata.${field} must be a string.`);
+    if (typeof metadata[field] !== "string")
+      throw new Error(`metadata.${field} must be a string.`);
   }
   if (typeof metadata.context_text !== "string") {
     throw new Error("metadata.context_text must be a string.");
@@ -1265,7 +1455,9 @@ function parseTree(value: string): DocumentTree {
   try {
     parsed = JSON.parse(value);
   } catch (error) {
-    throw new Error(`Invalid document tree JSON: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Invalid document tree JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.nodes)) {
     throw new Error("Document tree must contain a nodes array.");
@@ -1279,9 +1471,15 @@ function validateTree(tree: DocumentTree): Map<string, DocumentTreeNode> {
     if (!isRecord(node) || typeof node.node_id !== "string" || !node.node_id) {
       throw new Error("Every tree node must have a non-empty node_id.");
     }
-    if (nodes.has(node.node_id)) throw new Error(`Duplicate tree node '${node.node_id}'.`);
-    if (node.parent_node_id !== null && typeof node.parent_node_id !== "string") {
-      throw new Error(`Tree node '${node.node_id}' has an invalid parent_node_id.`);
+    if (nodes.has(node.node_id))
+      throw new Error(`Duplicate tree node '${node.node_id}'.`);
+    if (
+      node.parent_node_id !== null &&
+      typeof node.parent_node_id !== "string"
+    ) {
+      throw new Error(
+        `Tree node '${node.node_id}' has an invalid parent_node_id.`,
+      );
     }
     if (!Number.isInteger(node.depth) || node.depth < 0) {
       throw new Error(`Tree node '${node.node_id}' has an invalid depth.`);
@@ -1294,7 +1492,8 @@ function validateTree(tree: DocumentTree): Map<string, DocumentTreeNode> {
     }
     if (node.parent_node_id) {
       const parent = nodes.get(node.parent_node_id);
-      if (!parent) throw new Error(`Tree parent '${node.parent_node_id}' does not exist.`);
+      if (!parent)
+        throw new Error(`Tree parent '${node.parent_node_id}' does not exist.`);
       if (node.depth !== parent.depth + 1) {
         throw new Error(`Tree node '${node.node_id}' has an invalid depth.`);
       }
@@ -1304,7 +1503,8 @@ function validateTree(tree: DocumentTree): Map<string, DocumentTreeNode> {
     const visited = new Set<string>();
     let current: DocumentTreeNode | undefined = node;
     while (current?.parent_node_id) {
-      if (visited.has(current.node_id)) throw new Error("A cycle was detected in the tree.");
+      if (visited.has(current.node_id))
+        throw new Error("A cycle was detected in the tree.");
       visited.add(current.node_id);
       current = nodes.get(current.parent_node_id);
     }
@@ -1317,7 +1517,10 @@ function validateDocumentTreeLink(
   nodes: Map<string, DocumentTreeNode>,
 ): void {
   const node = nodes.get(document.document_id);
-  if (!node) throw new Error(`Document node '${document.document_id}' is missing from the tree.`);
+  if (!node)
+    throw new Error(
+      `Document node '${document.document_id}' is missing from the tree.`,
+    );
   if (node.parent_node_id !== document.parent_document_id) {
     throw new Error(
       `Document parent '${document.parent_document_id ?? "null"}' does not match tree parent '${node.parent_node_id ?? "null"}'.`,
@@ -1336,21 +1539,33 @@ function validateDocumentChunks(
   maxTokens: number,
   nodes: Map<string, DocumentTreeNode>,
 ): void {
-  if (chunks.length === 0) throw new Error("No non-empty chunks were produced.");
-  if (!nodes.has(document.document_id)) throw new Error("Document tree node is missing.");
+  if (chunks.length === 0)
+    throw new Error("No non-empty chunks were produced.");
+  if (!nodes.has(document.document_id))
+    throw new Error("Document tree node is missing.");
   for (const [index, chunk] of chunks.entries()) {
     if (!chunk.content.trim()) throw new Error("A chunk has empty content.");
-    if (!chunk.embedding_text.trim()) throw new Error("A chunk has empty embedding_text.");
-    if (containsForbiddenControlCharacters(chunk.content + chunk.embedding_text)) {
+    if (!chunk.embedding_text.trim())
+      throw new Error("A chunk has empty embedding_text.");
+    if (
+      containsForbiddenControlCharacters(chunk.content + chunk.embedding_text)
+    ) {
       throw new Error("A chunk contains a forbidden control character.");
     }
-    if (chunk.metadata.token_count !== tokenCounter.count(chunk.embedding_text)) {
+    if (
+      chunk.metadata.token_count !== tokenCounter.count(chunk.embedding_text)
+    ) {
       throw new Error("A chunk token_count does not match the tokenizer.");
     }
     if (chunk.metadata.token_count > maxTokens) {
-      throw new Error(`A chunk exceeds maxTokens (${chunk.metadata.token_count} > ${maxTokens}).`);
+      throw new Error(
+        `A chunk exceeds maxTokens (${chunk.metadata.token_count} > ${maxTokens}).`,
+      );
     }
-    if (chunk.metadata.chunk_index !== index || chunk.metadata.chunk_count !== chunks.length) {
+    if (
+      chunk.metadata.chunk_index !== index ||
+      chunk.metadata.chunk_count !== chunks.length
+    ) {
       throw new Error("Chunk indexes are inconsistent.");
     }
     if (chunk.previous_chunk_id !== (chunks[index - 1]?.chunk_id ?? null)) {
@@ -1359,10 +1574,16 @@ function validateDocumentChunks(
     if (chunk.next_chunk_id !== (chunks[index + 1]?.chunk_id ?? null)) {
       throw new Error("next_chunk_id is inconsistent.");
     }
-    if (chunk.metadata.breadcrumbs.join("\u001e") !== document.metadata.breadcrumbs.join("\u001e")) {
+    if (
+      chunk.metadata.breadcrumbs.join("\u001e") !==
+      document.metadata.breadcrumbs.join("\u001e")
+    ) {
       throw new Error("Chunk breadcrumbs do not match the document.");
     }
-    if (chunk.metadata.ancestor_ids.join("\u001e") !== document.metadata.ancestor_ids.join("\u001e")) {
+    if (
+      chunk.metadata.ancestor_ids.join("\u001e") !==
+      document.metadata.ancestor_ids.join("\u001e")
+    ) {
       throw new Error("Chunk ancestor_ids do not match the document.");
     }
     for (const asset of chunk.metadata.assets) {
@@ -1374,7 +1595,8 @@ function validateDocumentChunks(
 function validateGlobalChunks(chunks: ChunkRecord[]): void {
   const ids = new Set<string>();
   for (const chunk of chunks) {
-    if (ids.has(chunk.chunk_id)) throw new Error(`Duplicate chunk_id '${chunk.chunk_id}'.`);
+    if (ids.has(chunk.chunk_id))
+      throw new Error(`Duplicate chunk_id '${chunk.chunk_id}'.`);
     ids.add(chunk.chunk_id);
   }
   for (const chunk of chunks) {
@@ -1387,7 +1609,10 @@ function validateGlobalChunks(chunks: ChunkRecord[]): void {
   }
 }
 
-function annotateChunkDuplicates(chunks: ChunkRecord[], report: ChunkReport): void {
+function annotateChunkDuplicates(
+  chunks: ChunkRecord[],
+  report: ChunkReport,
+): void {
   const firstByHash = new Map<string, string>();
   for (const chunk of chunks) {
     const first = firstByHash.get(chunk.content_hash);
@@ -1406,7 +1631,8 @@ function finalizeReport(report: ChunkReport, chunks: ChunkRecord[]): void {
   report.errors = report.error_documents.length;
   const tokens = chunks.map((chunk) => chunk.metadata.token_count);
   const total = tokens.reduce((sum, value) => sum + value, 0);
-  report.average_tokens = tokens.length > 0 ? Number((total / tokens.length).toFixed(2)) : 0;
+  report.average_tokens =
+    tokens.length > 0 ? Number((total / tokens.length).toFixed(2)) : 0;
   report.minimum_tokens = tokens.length > 0 ? Math.min(...tokens) : 0;
   report.maximum_tokens = tokens.length > 0 ? Math.max(...tokens) : 0;
   report.chunks_below_min_tokens = chunks.filter(
@@ -1415,9 +1641,15 @@ function finalizeReport(report: ChunkReport, chunks: ChunkRecord[]): void {
   report.chunks_above_max_tokens = chunks.filter(
     (chunk) => chunk.metadata.token_count > report.max_tokens,
   ).length;
-  report.chunks_with_tables = chunks.filter((chunk) => chunk.metadata.contains_table).length;
-  report.chunks_with_code = chunks.filter((chunk) => chunk.metadata.contains_code).length;
-  report.chunks_with_images = chunks.filter((chunk) => chunk.metadata.assets.length > 0).length;
+  report.chunks_with_tables = chunks.filter(
+    (chunk) => chunk.metadata.contains_table,
+  ).length;
+  report.chunks_with_code = chunks.filter(
+    (chunk) => chunk.metadata.contains_code,
+  ).length;
+  report.chunks_with_images = chunks.filter(
+    (chunk) => chunk.metadata.assets.length > 0,
+  ).length;
   report.oversized_chunks = chunks
     .filter((chunk) => chunk.metadata.oversized)
     .map((chunk) => ({
@@ -1470,12 +1702,22 @@ function validateOptions(options: {
   overlapTokens: number;
 }): void {
   for (const [name, value] of Object.entries(options)) {
-    if (!Number.isInteger(value) || value < (name === "overlapTokens" ? 0 : 1)) {
-      throw new Error(`${name} must be ${name === "overlapTokens" ? "a non-negative" : "a positive"} integer.`);
+    if (
+      !Number.isInteger(value) ||
+      value < (name === "overlapTokens" ? 0 : 1)
+    ) {
+      throw new Error(
+        `${name} must be ${name === "overlapTokens" ? "a non-negative" : "a positive"} integer.`,
+      );
     }
   }
-  if (options.minTokens > options.targetTokens || options.targetTokens > options.maxTokens) {
-    throw new Error("Token limits must satisfy minTokens <= targetTokens <= maxTokens.");
+  if (
+    options.minTokens > options.targetTokens ||
+    options.targetTokens > options.maxTokens
+  ) {
+    throw new Error(
+      "Token limits must satisfy minTokens <= targetTokens <= maxTokens.",
+    );
   }
   if (options.overlapTokens >= options.targetTokens) {
     throw new Error("overlapTokens must be smaller than targetTokens.");
@@ -1503,7 +1745,11 @@ async function writeResults(options: {
       : "";
     await Promise.all([
       writeFile(outputTemp, jsonl, "utf8"),
-      writeFile(reportTemp, `${JSON.stringify(options.report, null, 2)}\n`, "utf8"),
+      writeFile(
+        reportTemp,
+        `${JSON.stringify(options.report, null, 2)}\n`,
+        "utf8",
+      ),
     ]);
     await publishFiles(
       [
@@ -1513,21 +1759,30 @@ async function writeResults(options: {
       options.force,
     );
   } catch (error) {
-    await Promise.all([rm(outputTemp, { force: true }), rm(reportTemp, { force: true })]);
+    await Promise.all([
+      rm(outputTemp, { force: true }),
+      rm(reportTemp, { force: true }),
+    ]);
     throw error;
   }
 }
 
 async function requireFile(path: string, label: string): Promise<void> {
   const fileStats = await stat(path).catch(() => null);
-  if (!fileStats?.isFile()) throw new Error(`${label} does not exist or is not a file: ${path}`);
+  if (!fileStats?.isFile())
+    throw new Error(`${label} does not exist or is not a file: ${path}`);
 }
 
-async function assertTargetsAvailable(targets: string[], force: boolean): Promise<void> {
+async function assertTargetsAvailable(
+  targets: string[],
+  force: boolean,
+): Promise<void> {
   if (force) return;
   for (const target of targets) {
     if (await pathExists(target)) {
-      throw new Error(`Output already exists: ${target}. Use --force to replace it.`);
+      throw new Error(
+        `Output already exists: ${target}. Use --force to replace it.`,
+      );
     }
   }
 }
@@ -1562,7 +1817,10 @@ async function publishFiles(
 }
 
 function temporarySibling(target: string): string {
-  return join(dirname(target), `.${basename(target)}.tmp-${process.pid}-${Date.now()}`);
+  return join(
+    dirname(target),
+    `.${basename(target)}.tmp-${process.pid}-${Date.now()}`,
+  );
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -1585,14 +1843,18 @@ function assertRelativeLocalPath(
     isAbsolute(normalized) ||
     /^[a-z]:\//iu.test(normalized) ||
     normalized.startsWith("file://") ||
-    (!allowParentTraversal && (normalized === ".." || normalized.startsWith("../")))
+    (!allowParentTraversal &&
+      (normalized === ".." || normalized.startsWith("../")))
   ) {
     throw new Error(`${label} must be a relative path: ${value}`);
   }
 }
 
 function decodeHtmlEntities(value: string): string {
-  return value.replace(/&amp;/giu, "&").replace(/&quot;/giu, '"').replace(/&apos;/giu, "'");
+  return value
+    .replace(/&amp;/giu, "&")
+    .replace(/&quot;/giu, '"')
+    .replace(/&apos;/giu, "'");
 }
 
 function countCharacter(value: string, character: string): number {

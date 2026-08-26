@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { runtimeConfig } from "./config.js";
-import { E5_MODEL_CONTRACT } from "./model-contract.js";
-import { TeiE5EmbeddingProvider } from "./providers/tei-e5-provider.js";
+import { MODEL_CONTRACT } from "./model-contract.js";
+import { TeiEmbeddingProvider } from "./providers/tei-provider.js";
 import { ReadOnlyQdrantStore } from "./qdrant/read-only-qdrant-store.js";
 
 const program = new Command()
@@ -20,7 +20,7 @@ const config = runtimeConfig({
   ...(options.qdrantUrl ? { qdrantUrl: options.qdrantUrl } : {}),
   ...(options.teiUrl ? { teiUrl: options.teiUrl } : {}),
 });
-const tei = new TeiE5EmbeddingProvider({ baseUrl: config.teiUrl, timeoutMs: config.timeoutMs });
+const tei = new TeiEmbeddingProvider({ baseUrl: config.teiUrl, timeoutMs: config.timeoutMs });
 const qdrant = new ReadOnlyQdrantStore({
   url: config.qdrantUrl,
   collection: config.collection,
@@ -28,8 +28,8 @@ const qdrant = new ReadOnlyQdrantStore({
 });
 
 const snapshot = await qdrant.snapshot();
-if (snapshot.dimension !== E5_MODEL_CONTRACT.dimension || snapshot.metadata.embedding_model !== E5_MODEL_CONTRACT.modelId || snapshot.metadata.embedding_model_revision !== E5_MODEL_CONTRACT.revision) {
-  throw new Error("Qdrant collection does not match the pinned Xenova/multilingual-e5-small contract.");
+if (snapshot.dimension !== MODEL_CONTRACT.dimension || snapshot.metadata.embedding_model !== MODEL_CONTRACT.modelId || snapshot.metadata.embedding_model_revision !== MODEL_CONTRACT.revision) {
+  throw new Error("Qdrant collection does not match the configured embedding contract.");
 }
 const [vector] = await tei.embedQueries([options.query]);
 const hits = await qdrant.search(vector!, options.limit);

@@ -6,16 +6,24 @@ import (
 )
 
 const (
-	DefaultModel         = "Xenova/multilingual-e5-small"
-	DefaultModelRevision = "761b726dd34fb83930e26aab4e9ac3899aa1fa78"
-	DefaultDType         = "q8"
-	DefaultDimension     = 384
-	DefaultPipeline      = "1"
-	DefaultCollection    = "methodology_e5_small_v1"
-	EmbeddingBackend     = "tei"
-	PointIDNamespace     = "a1f0e7c2-7a6b-5c74-9f3e-6c8d91b3a204"
-	maxModelTokens       = 512
+	DefaultCollection = "methodology_e5_small_v1"
+	EmbeddingBackend  = "tei"
 )
+
+type EmbeddingContract struct {
+	ModelID         string
+	Revision        string
+	Dimension       int
+	DType           string
+	Pooling         string
+	Normalized      bool
+	DocumentPrefix  string
+	QueryPrefix     string
+	MaxInputTokens  int
+	AutoTruncate    bool
+	PipelineVersion string
+	PointNamespace  string
+}
 
 var payloadIndexes = []string{
 	"document_id", "parent_document_id", "page_id", "parent_page_id", "root_page_id",
@@ -25,6 +33,7 @@ var payloadIndexes = []string{
 }
 
 type Config struct {
+	Contract           EmbeddingContract
 	InputFile          string
 	ReportFile         string
 	Collection         string
@@ -34,7 +43,6 @@ type Config struct {
 	TEIURL             string
 	TEITimeout         time.Duration
 	BatchSize          int
-	PipelineVersion    string
 	VectorCacheSize    int
 	StoreEmbeddingText bool
 	DryRun             bool
@@ -46,6 +54,7 @@ type Config struct {
 }
 
 type RunConfig struct {
+	Contract           EmbeddingContract
 	RunDir             string
 	ReportFile         string
 	QdrantURL          string
@@ -54,7 +63,6 @@ type RunConfig struct {
 	TEIURL             string
 	TEITimeout         time.Duration
 	BatchSize          int
-	PipelineVersion    string
 	VectorCacheSize    int
 	StoreEmbeddingText bool
 	DryRun             bool
@@ -105,6 +113,9 @@ type PipelineIdentity struct {
 	EmbeddingPooling         string `json:"embedding_pooling"`
 	EmbeddingNormalized      bool   `json:"embedding_normalized"`
 	DocumentPrefix           string `json:"document_prefix"`
+	QueryPrefix              string `json:"query_prefix"`
+	EmbeddingMaxInputTokens  int    `json:"embedding_max_input_tokens"`
+	EmbeddingAutoTruncate    bool   `json:"embedding_auto_truncate"`
 	EmbeddingPipelineVersion string `json:"embedding_pipeline_version"`
 	PointNamespace           string `json:"point_namespace"`
 }

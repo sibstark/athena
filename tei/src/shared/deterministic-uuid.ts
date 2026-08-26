@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { E5_MODEL_CONTRACT } from "../model-contract.js";
+import { MODEL_CONTRACT } from "../model-contract.js";
 
-export function uuidV5(name: string, namespace = E5_MODEL_CONTRACT.pointNamespace): string {
+export function uuidV5(name: string, namespace = MODEL_CONTRACT.pointNamespace): string {
   const namespaceBytes = Buffer.from(namespace.replaceAll("-", ""), "hex");
   const digest = createHash("sha1").update(namespaceBytes).update(name, "utf8").digest().subarray(0, 16);
   digest[6] = (digest[6]! & 0x0f) | 0x50;

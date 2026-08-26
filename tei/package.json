@@ -10,7 +10,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:tei:integration": "RUN_TEI_INTEGRATION=1 vitest run tests/integration.test.ts",
-    "model:prepare": "bun src/prepare-model.ts",
     "rag:search": "bun src/cli-search.ts",
     "rag:compat": "bun src/cli-compat.ts"
   },

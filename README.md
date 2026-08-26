@@ -19,7 +19,7 @@ CLI не вызывают внешние сервисы автоматическ
 
 `fetcher` сохраняет снимок в `run_<id>` и нормализует его в отдельный `normalized_<id>`. TypeScript chunker одним запуском обрабатывает все объявленные workspace и создаёт `chunks_<id>`. После этого Go-indexer синхронизирует каждую успешную workspace-коллекцию с Qdrant через внешний TEI.
 
-Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
+Все embedding-компоненты читают один обязательный контракт из корневого `.env`. Для текущего индекса используется `Snowflake/snowflake-arctic-embed-m-v2.0@95c2741480856aa9666782eb4afe11959938017f`: 768 координат, CLS pooling, L2 normalization, пустой document prefix и `query: ` для поиска. В коде и Compose нет fallback-модели.
 
 ## Общий Qdrant
 
@@ -33,7 +33,7 @@ docker compose logs -f qdrant
 docker compose down
 ```
 
-Qdrant доступен только на `127.0.0.1:${QDRANT_PORT:-6333}`. Данные и snapshots сохраняются в `var/qdrant/`. Версия образа закреплена через `QDRANT_VERSION`.
+Qdrant доступен только на `127.0.0.1:${QDRANT_PORT:-6333}`. Данные и snapshots сохраняются в `var/qdrant/`. Образ `qdrant/qdrant:v1.19.0` закреплён непосредственно в Compose.
 
 ## Rust TEI
 
@@ -47,6 +47,12 @@ bun run tei:down
 ```
 
 Подробности, smoke search и compatibility test: [tei/README.md](tei/README.md).
+
+Перед первым запуском chunker скачайте и проверьте закреплённые tokenizer-файлы:
+
+```bash
+bun run chunker:tokenizer
+```
 
 ## Go RAG API
 

@@ -29,7 +29,7 @@ func TestListCollectionsUsesReadOnlyEndpointAndReturnsSortedUniqueNames(t *testi
 	}))
 	defer server.Close()
 
-	collections, err := New(server.URL, "secret", "default", time.Second, nil).ListCollections(t.Context())
+	collections, err := New(server.URL, "secret", "default", time.Second, testContract(), nil).ListCollections(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestListCollectionsReturnsNonNilEmptySlice(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collections, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+	collections, err := New(server.URL, "", "default", time.Second, testContract(), nil).ListCollections(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"result": nil})
 		}))
 		defer server.Close()
-		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		_, err := New(server.URL, "", "default", time.Second, testContract(), nil).ListCollections(t.Context())
 		if !errors.Is(err, models.ErrQdrantUnavailable) {
 			t.Fatalf("error=%v", err)
 		}
@@ -70,7 +70,7 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{map[string]any{"name": " "}}}})
 		}))
 		defer server.Close()
-		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		_, err := New(server.URL, "", "default", time.Second, testContract(), nil).ListCollections(t.Context())
 		if !errors.Is(err, models.ErrQdrantUnavailable) {
 			t.Fatalf("error=%v", err)
 		}
@@ -81,7 +81,7 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 		}))
 		defer server.Close()
-		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		_, err := New(server.URL, "", "default", time.Second, testContract(), nil).ListCollections(t.Context())
 		if !errors.Is(err, models.ErrQdrantUnavailable) {
 			t.Fatalf("error=%v", err)
 		}
@@ -102,7 +102,7 @@ func TestSearchBuildsFlatPayloadFilters(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{"id": "1", "score": 0.8, "payload": map[string]any{"chunk_id": "chunk_1"}}}})
 	}))
 	defer server.Close()
-	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, nil)
+	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, testContract(), nil)
 	hits, err := client.Search(t.Context(), SearchParams{Vector: []float64{1}, Limit: 8, ScoreThreshold: .65, Filters: models.Filters{RootPageID: "3035", Language: "ru"}})
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestSearchFanoutsAcrossRequestedCollections(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, nil)
+	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, testContract(), nil)
 	hits, err := client.Search(t.Context(), SearchParams{
 		Vector:      []float64{1},
 		Limit:       8,
@@ -154,11 +154,33 @@ func TestSearchFanoutsAcrossRequestedCollections(t *testing.T) {
 }
 
 func TestReadyValidatesCollection(t *testing.T) {
+	contract := testContract()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"status": "green", "points_count": 1, "config": map[string]any{"params": map[string]any{"vectors": map[string]any{"size": 384, "distance": "Cosine"}}, "metadata": map[string]any{"embedding_model": models.EmbeddingModel, "embedding_model_revision": models.EmbeddingRevision}}}})
+		json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"status": "green", "points_count": 1, "config": map[string]any{"params": map[string]any{"vectors": map[string]any{"size": contract.Dimension, "distance": "Cosine"}}, "metadata": contractMetadata(contract)}}})
 	}))
 	defer server.Close()
-	if err := New(server.URL, "", "collection", time.Second, nil).Ready(t.Context()); err != nil {
+	if err := New(server.URL, "", "collection", time.Second, contract, nil).Ready(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func testContract() models.EmbeddingContract {
+	return models.EmbeddingContract{
+		ModelID: "test/model", Revision: "test-revision", Dimension: 8, DType: "float32",
+		Pooling: "cls", Normalized: true, DocumentPrefix: "", QueryPrefix: "query: ",
+		MaxInputTokens: 8192, AutoTruncate: false, PipelineVersion: "2",
+		PointNamespace: "6195ee42-5bb1-4440-93c2-285e67dbcbf2",
+	}
+}
+
+func contractMetadata(contract models.EmbeddingContract) map[string]any {
+	return map[string]any{
+		"embedding_model": contract.ModelID, "embedding_model_revision": contract.Revision,
+		"embedding_dimension": contract.Dimension, "embedding_dtype": contract.DType,
+		"embedding_pooling": contract.Pooling, "embedding_normalized": contract.Normalized,
+		"document_prefix": contract.DocumentPrefix, "query_prefix": contract.QueryPrefix,
+		"embedding_max_input_tokens": contract.MaxInputTokens, "embedding_auto_truncate": contract.AutoTruncate,
+		"embedding_pipeline_version": contract.PipelineVersion,
+		"point_namespace":            contract.PointNamespace,
 	}
 }

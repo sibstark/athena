@@ -63,11 +63,11 @@ If a workspace tree or document fails, the run directory contains only a redacte
 
 The official Bitrix MCP documentation describes the following Knowledge Base 2.0 REST 3.0 surface:
 
-| Area | Available operations |
-|---|---|
-| `note.collection.*` | add, update, get, list, delete, archive, field get/list |
-| `note.document.*` | add, update, get, delete, archive, tree list, search list, document/tree/search field get/list |
-| `note.file.*` | add, get, delete, field get/list |
+| Area                | Available operations                                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------- |
+| `note.collection.*` | add, update, get, list, delete, archive, field get/list                                        |
+| `note.document.*`   | add, update, get, delete, archive, tree list, search list, document/tree/search field get/list |
+| `note.file.*`       | add, get, delete, field get/list                                                               |
 
 Fetcher only calls `note.collection.list`, `note.document.tree.list`, and `note.document.get`.
 
@@ -151,9 +151,9 @@ go run ./cmd/fetcher index \
   --prune
 ```
 
-Перед любой записью indexer проверяет `/health` и `/info` внешнего TEI, точные model ID/revision и запрет truncation. Qdrant и TEI команда не запускает. Настройки читаются из `TEI_URL`, `TEI_TIMEOUT`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_TIMEOUT`, `QDRANT_COLLECTION`, `INDEXER_BATCH_SIZE`, `EMBEDDING_PIPELINE_VERSION`, `EMBEDDING_VECTOR_CACHE_SIZE`, `STORE_EMBEDDING_TEXT` и `LOG_LEVEL`.
+Перед любой записью indexer проверяет `/health` и `/info` внешнего TEI, exact model ID/revision, dtype, max input и auto-truncate. Qdrant и TEI команда не запускает. Полный embedding contract обязателен в корневом `.env`: `EMBEDDING_MODEL_ID`, `EMBEDDING_MODEL_REVISION`, `EMBEDDING_DIMENSION`, `EMBEDDING_DTYPE`, `EMBEDDING_POOLING`, `EMBEDDING_NORMALIZED`, оба prefix, max input, auto-truncate, pipeline version и point namespace. Остальные настройки: `TEI_URL`, `TEI_TIMEOUT`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_TIMEOUT`, `QDRANT_COLLECTION`, `INDEXER_BATCH_SIZE`, `EMBEDDING_VECTOR_CACHE_SIZE`, `STORE_EMBEDDING_TEXT`, `LOG_LEVEL`.
 
-Payload новых точек содержит `embedding_backend: "tei"` и, если он присутствует в chunk metadata, точный `document_url` исходного документа Bitrix. Добавление или изменение `document_url` выполняется как payload-only update без повторного вычисления embedding. Существующие точки Transformers.js без `embedding_backend` автоматически вычисляются заново; их vectors не используются как кеш. UUID точек и остальные параметры embedding pipeline остаются совместимыми.
+Payload новых точек содержит `embedding_backend: "tei"` и, если он присутствует в chunk metadata, точный `document_url` исходного документа Bitrix. Добавление или изменение `document_url` выполняется как payload-only update без повторного вычисления embedding. Collection metadata хранит весь embedding contract; несовместимая коллекция отклоняется до записи. Новый `EMBEDDING_POINT_NAMESPACE` изолирует UUID точек от старой модели.
 
 Полезные режимы: `--dry-run`, `--force-reembed`, `--continue-on-error`; `--prune` применяется вручную только с `--input`, а с `--run` всегда включён безопасно.
 

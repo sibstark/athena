@@ -1,4 +1,4 @@
-import { E5_MODEL_CONTRACT } from "../model-contract.js";
+import { MODEL_CONTRACT } from "../model-contract.js";
 
 export interface EmbeddingProvider {
   readonly modelId: string;
@@ -12,7 +12,7 @@ export interface EmbeddingProvider {
 export type EmbeddingKind = "document" | "query";
 
 export function prefixInput(text: string, kind: EmbeddingKind): string {
-  const expected = kind === "document" ? E5_MODEL_CONTRACT.documentPrefix : E5_MODEL_CONTRACT.queryPrefix;
+  const expected = kind === "document" ? MODEL_CONTRACT.documentPrefix : MODEL_CONTRACT.queryPrefix;
   const withoutKnownPrefix = text.replace(/^(?:passage|query):\s*/u, "");
   return `${expected}${withoutKnownPrefix}`;
 }

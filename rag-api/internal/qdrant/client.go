@@ -24,6 +24,7 @@ type Client struct {
 	collection string
 	http       *http.Client
 	observe    Observer
+	contract   models.EmbeddingContract
 }
 
 type Snapshot struct {
@@ -49,8 +50,8 @@ type SearchParams struct {
 	Filters        models.Filters
 }
 
-func New(baseURL, apiKey, collection string, timeout time.Duration, observer Observer) *Client {
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, collection: collection, http: &http.Client{Timeout: timeout}, observe: observer}
+func New(baseURL, apiKey, collection string, timeout time.Duration, contract models.EmbeddingContract, observer Observer) *Client {
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, collection: collection, http: &http.Client{Timeout: timeout}, contract: contract, observe: observer}
 }
 
 func (c *Client) Collection() string { return c.collection }
@@ -100,17 +101,30 @@ func (c *Client) Ready(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if snapshot.Dimension != models.EmbeddingDimension || !strings.EqualFold(snapshot.Distance, "Cosine") {
+	if snapshot.Dimension != c.contract.Dimension || !strings.EqualFold(snapshot.Distance, "Cosine") {
 		return fmt.Errorf("%w: incompatible collection vectors %d/%s", models.ErrQdrantUnavailable, snapshot.Dimension, snapshot.Distance)
 	}
 	if !strings.EqualFold(snapshot.Status, "green") || snapshot.PointsCount <= 0 {
 		return fmt.Errorf("%w: collection is not ready (status=%s, points=%d)", models.ErrQdrantUnavailable, snapshot.Status, snapshot.PointsCount)
 	}
-	if model, _ := snapshot.Metadata["embedding_model"].(string); model != models.EmbeddingModel {
-		return fmt.Errorf("%w: incompatible embedding_model %q", models.ErrQdrantUnavailable, model)
+	expected := map[string]any{
+		"embedding_model":            c.contract.ModelID,
+		"embedding_model_revision":   c.contract.Revision,
+		"embedding_dimension":        c.contract.Dimension,
+		"embedding_dtype":            c.contract.DType,
+		"embedding_pooling":          c.contract.Pooling,
+		"embedding_normalized":       c.contract.Normalized,
+		"document_prefix":            c.contract.DocumentPrefix,
+		"query_prefix":               c.contract.QueryPrefix,
+		"embedding_max_input_tokens": c.contract.MaxInputTokens,
+		"embedding_auto_truncate":    c.contract.AutoTruncate,
+		"embedding_pipeline_version": c.contract.PipelineVersion,
+		"point_namespace":            c.contract.PointNamespace,
 	}
-	if revision, _ := snapshot.Metadata["embedding_model_revision"].(string); revision != models.EmbeddingRevision {
-		return fmt.Errorf("%w: incompatible embedding revision %q", models.ErrQdrantUnavailable, revision)
+	for key, value := range expected {
+		if fmt.Sprint(snapshot.Metadata[key]) != fmt.Sprint(value) {
+			return fmt.Errorf("%w: incompatible %s %q", models.ErrQdrantUnavailable, key, snapshot.Metadata[key])
+		}
 	}
 	return nil
 }

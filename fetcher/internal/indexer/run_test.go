@@ -15,7 +15,7 @@ func TestIndexRunProcessesEveryWorkspaceAndPrunes(t *testing.T) {
 		{"id": 2, "name": "Two", "path": "workspace_2", "qdrantCollection": "workspace_2", "status": "complete", "errors": 0},
 	})
 	provider, store := &fakeProvider{}, newFakeStore()
-	report, err := IndexRun(context.Background(), RunConfig{RunDir: root, BatchSize: 2}, Dependencies{Provider: provider, Store: store})
+	report, err := IndexRun(context.Background(), RunConfig{Contract: testContract(), RunDir: root, BatchSize: 2}, Dependencies{Provider: provider, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestIndexRunAcceptsRelativeRunDirectoryWithMultipleWorkspaces(t *testing.T)
 	})
 	t.Chdir(parent)
 
-	report, err := IndexRun(context.Background(), RunConfig{RunDir: "chunks_1", BatchSize: 2}, Dependencies{Provider: &fakeProvider{}, Store: newFakeStore()})
+	report, err := IndexRun(context.Background(), RunConfig{Contract: testContract(), RunDir: "chunks_1", BatchSize: 2}, Dependencies{Provider: &fakeProvider{}, Store: newFakeStore()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestIndexRunValidatesAllArtifactsBeforeQdrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := newFakeStore()
-	if _, err := IndexRun(context.Background(), RunConfig{RunDir: root}, Dependencies{Provider: &fakeProvider{}, Store: store}); err == nil {
+	if _, err := IndexRun(context.Background(), RunConfig{Contract: testContract(), RunDir: root}, Dependencies{Provider: &fakeProvider{}, Store: store}); err == nil {
 		t.Fatal("expected validation error")
 	}
 	if store.pingCalls != 0 {
@@ -66,7 +66,7 @@ func TestIndexRunSkipsFailedChunkWorkspaceWithoutChangingQdrant(t *testing.T) {
 		{"id": 1, "name": "Failed", "path": "workspace_1", "qdrantCollection": "workspace_1", "status": "failed", "errors": 1},
 	})
 	store := newFakeStore()
-	report, err := IndexRun(context.Background(), RunConfig{RunDir: root}, Dependencies{Provider: &fakeProvider{}, Store: store})
+	report, err := IndexRun(context.Background(), RunConfig{Contract: testContract(), RunDir: root}, Dependencies{Provider: &fakeProvider{}, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestIndexRunProcessesWarningWorkspaceAndPrunesFailedDocumentPoints(t *testi
 	store := newFakeStore()
 	store.points["stale-failed-document"] = Point{ID: "stale-failed-document", Vector: unitVector(), Payload: map[string]any{}}
 
-	report, err := IndexRun(context.Background(), RunConfig{RunDir: root, BatchSize: 2}, Dependencies{Provider: &fakeProvider{}, Store: store})
+	report, err := IndexRun(context.Background(), RunConfig{Contract: testContract(), RunDir: root, BatchSize: 2}, Dependencies{Provider: &fakeProvider{}, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestIndexRunEmptyWorkspacePrunesEveryManagedPoint(t *testing.T) {
 	}
 	store := newFakeStore()
 	store.points["stale"] = Point{ID: "stale", Vector: unitVector(), Payload: map[string]any{}}
-	report, err := IndexRun(context.Background(), RunConfig{RunDir: root}, Dependencies{Provider: &fakeProvider{}, Store: store})
+	report, err := IndexRun(context.Background(), RunConfig{Contract: testContract(), RunDir: root}, Dependencies{Provider: &fakeProvider{}, Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}

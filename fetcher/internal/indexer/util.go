@@ -14,8 +14,8 @@ import (
 
 var knownPrefix = regexp.MustCompile(`^(?:passage|query):\s*`)
 
-func embeddingInput(text string) string {
-	return "passage: " + knownPrefix.ReplaceAllString(text, "")
+func embeddingInput(text string, contract EmbeddingContract) string {
+	return contract.DocumentPrefix + knownPrefix.ReplaceAllString(text, "")
 }
 
 func hashText(value string) string {
@@ -23,10 +23,10 @@ func hashText(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func pointID(name string) (string, error) {
-	namespace, err := hex.DecodeString(strings.ReplaceAll(PointIDNamespace, "-", ""))
+func pointID(name string, pointNamespace string) (string, error) {
+	namespace, err := hex.DecodeString(strings.ReplaceAll(pointNamespace, "-", ""))
 	if err != nil || len(namespace) != 16 {
-		return "", fmt.Errorf("invalid point namespace %q", PointIDNamespace)
+		return "", fmt.Errorf("invalid point namespace %q", pointNamespace)
 	}
 	h := sha1.New()
 	_, _ = h.Write(namespace)
@@ -46,9 +46,9 @@ func stableHash(value map[string]any) (string, error) {
 	return hashText(string(data)), nil
 }
 
-func validateVector(vector []float64) error {
-	if len(vector) != DefaultDimension {
-		return fmt.Errorf("embedding dimension is %d, expected %d", len(vector), DefaultDimension)
+func validateVector(vector []float64, contract EmbeddingContract) error {
+	if len(vector) != contract.Dimension {
+		return fmt.Errorf("embedding dimension is %d, expected %d", len(vector), contract.Dimension)
 	}
 	normSquared := 0.0
 	for _, value := range vector {
@@ -58,7 +58,7 @@ func validateVector(vector []float64) error {
 		normSquared += value * value
 	}
 	norm := math.Sqrt(normSquared)
-	if norm < 0.99 || norm > 1.01 {
+	if contract.Normalized && (norm < 0.99 || norm > 1.01) {
 		return fmt.Errorf("embedding L2 norm is %.6f, expected approximately 1", norm)
 	}
 	return nil
@@ -72,12 +72,15 @@ func portableRelative(path string) string {
 	return filepath.ToSlash(relative)
 }
 
-func pipeline(version string) PipelineIdentity {
+func pipeline(contract EmbeddingContract) PipelineIdentity {
 	return PipelineIdentity{
-		EmbeddingModel: DefaultModel, EmbeddingModelRevision: DefaultModelRevision,
-		EmbeddingDimension: DefaultDimension, EmbeddingDType: DefaultDType,
-		EmbeddingPooling: "mean", EmbeddingNormalized: true, DocumentPrefix: "passage:",
-		EmbeddingPipelineVersion: version, PointNamespace: PointIDNamespace,
+		EmbeddingModel: contract.ModelID, EmbeddingModelRevision: contract.Revision,
+		EmbeddingDimension: contract.Dimension, EmbeddingDType: contract.DType,
+		EmbeddingPooling: contract.Pooling, EmbeddingNormalized: contract.Normalized,
+		DocumentPrefix: contract.DocumentPrefix, QueryPrefix: contract.QueryPrefix,
+		EmbeddingMaxInputTokens: contract.MaxInputTokens, EmbeddingAutoTruncate: contract.AutoTruncate,
+		EmbeddingPipelineVersion: contract.PipelineVersion,
+		PointNamespace:           contract.PointNamespace,
 	}
 }
 

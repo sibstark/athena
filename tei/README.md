@@ -1,30 +1,20 @@
-# Athena TEI compatibility tools
+# Athena TEI tools
 
-`tei/` — отдельный Bun/TypeScript-проект для работы с официальным Rust-сервисом Hugging Face Text Embeddings Inference. TypeScript не выполняет production inference: он вызывает TEI по HTTP, делает read-only поиск в Qdrant и сравнивает результаты с существующим Transformers.js pipeline.
+`tei/` содержит Bun/TypeScript HTTP-клиенты для официального Rust-сервиса Hugging Face Text Embeddings Inference. Production inference выполняет только TEI; инструменты делают smoke search и read-only compatibility-проверки Qdrant.
 
-Во всех режимах разрешена только модель:
+## Единый embedding contract
 
-```text
-Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78
-```
+Model ID, exact revision, dimension, dtype, pooling, normalization, document/query prefixes, max input, auto-truncate, pipeline version и point namespace обязательны в корневом `.env`. Fallback-модели нет. Текущая конфигурация использует `Snowflake/snowflake-arctic-embed-m-v2.0@95c2741480856aa9666782eb4afe11959938017f`, CLS pooling, 768 координат, пустой document prefix и `query: ` для запросов.
 
-Подмена на `intfloat/multilingual-e5-small` запрещена.
+Compose явно закрепляет:
+
+- `ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.3@sha256:c26a226262ad4ff3330fb30b76653c1bb65da2fcf413b92284545a010e0a8a48`;
+- `platform: linux/amd64`;
+- Qdrant `v1.19.0`.
+
+Переменных `TEI_IMAGE`, `TEI_PLATFORM` и `QDRANT_VERSION` нет.
 
 ## Запуск
-
-Официальная документация перечисляет ARM64 image, но на момент проверки тег `cpu-arm64-1.9` отсутствовал в GHCR (`manifest unknown`). Поэтому на Apple Silicon используется официальный amd64 image через Docker-эмуляцию:
-
-```env
-TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-TEI_PLATFORM=linux/amd64
-```
-
-На x86_64:
-
-```env
-TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-TEI_PLATFORM=linux/amd64
-```
 
 ```bash
 cd ..
@@ -36,33 +26,29 @@ curl -fsS http://127.0.0.1:8080/health
 curl -fsS http://127.0.0.1:8080/info
 ```
 
-`tei:up` сначала выполняет `tei:prepare`: берёт закреплённый `onnx/model_quantized.onnx` q8 из общего кеша `var/models`, размещает его в TEI Hub cache под ожидаемым именем `onnx/model.onnx`, записывает SHA-256 manifest и пересоздаёт только контейнер `embeddings`. Model ID/revision не меняются.
-
-Кеш TEI хранится в `var/tei`, существующий q8-кеш Transformers.js — в `var/models`. После первого pull получите digest:
+Модель скачивается TEI в `var/tei`. Chunker использует только два tokenizer-файла из отдельного проверяемого кеша; подготовьте их явно:
 
 ```bash
-docker image inspect "$TEI_IMAGE" --format '{{index .RepoDigests 0}}'
+bun run chunker:tokenizer
 ```
-
-Проверенный digest уже закреплён в Compose, `.env.example` и `tei/image-lock.json`. При обновлении TEI повторите inspect и compatibility test.
 
 ## Smoke search
 
 ```bash
 bun run rag:search:tei -- \
   --query "Что делать, если у ребёнка нет абакуса?" \
-  --collection methodology_e5_small_v1 \
+  --collection workspace_17 \
   --limit 10
 ```
 
-Команда добавляет `query: `, проверяет точную модель/revision и выполняет только чтение.
+Команда добавляет ровно один configured query prefix, проверяет TEI и metadata коллекции, затем выполняет только чтение.
 
 ## Compatibility test
 
 ```bash
 bun run rag:compat:tei -- \
-  --chunks data/normalized/mental-arithmetic/chunks.jsonl \
-  --collection methodology_e5_small_v1 \
+  --chunks data/chunks/chunks_<id>/workspace_17/chunks.jsonl \
+  --collection workspace_17 \
   --queries tei/data/eval/queries.jsonl \
   --sample-size 100 \
   --seed 42 \
@@ -72,17 +58,4 @@ bun run rag:compat:tei -- \
   --offline
 ```
 
-Результаты: JSON и Markdown. Команда не экспонирует методы Qdrant для создания, обновления или удаления данных. До и после теста сравниваются status, config, payload schema и points count.
-
-- `PASS_STRICT`: revision и pipeline подтверждены, численные и retrieval-пороги пройдены.
-- `PASS`: поиск совместим при допустимых численных отличиях.
-- `WARN`: часть сведений неизвестна или проверка неполна.
-- `FAIL`: модель, размерность, truncation или качество поиска несовместимы.
-
-При `WARN`/`FAIL` существующая коллекция не меняется. Переиндексация этим проектом не выполняется.
-
-## Почему одна модель обязательна
-
-Документные и query embeddings должны находиться в одном векторном пространстве. Chunker, Go-indexer в `fetcher`, TEI и Go RAG API используют один model ID, revision, pooling, normalization и E5-префиксы. Для другой модели создаётся новая коллекция после отдельного решения.
-
-Go RAG API вызывает `POST /embed` TEI с `query: <вопрос>`, проверяет 384 координаты и выполняет поиск в Qdrant; Go-indexer использует тот же endpoint с `passage: <документ>`.
+Инструмент не создаёт, не обновляет и не удаляет точки. `PASS_STRICT` означает точное совпадение revision/pipeline и прохождение численных и retrieval-порогов; `WARN`/`FAIL` не меняют коллекцию.

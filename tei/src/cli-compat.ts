@@ -4,8 +4,8 @@ import { Command } from "commander";
 import { runCompatibilityTest } from "./compatibility.js";
 import { runtimeConfig } from "./config.js";
 import { readQueries, selectChunkSample } from "./io.js";
-import { TeiE5EmbeddingProvider } from "./providers/tei-e5-provider.js";
-import { TransformersJsE5ReferenceProvider } from "./providers/transformers-js-reference-provider.js";
+import { TeiEmbeddingProvider } from "./providers/tei-provider.js";
+import { TransformersJsReferenceProvider } from "./providers/transformers-js-reference-provider.js";
 import { ReadOnlyQdrantStore } from "./qdrant/read-only-qdrant-store.js";
 import { writeCompatibilityReports } from "./report.js";
 
@@ -37,8 +37,8 @@ const config = runtimeConfig({
 
 const sample = await selectChunkSample(resolve(options.chunks), options.sampleSize, options.seed);
 const queryInput = await readQueries(resolve(options.queries));
-const tei = new TeiE5EmbeddingProvider({ baseUrl: config.teiUrl, timeoutMs: config.timeoutMs });
-const reference = new TransformersJsE5ReferenceProvider({ cacheDir: config.cacheDir, offline: options.offline });
+const tei = new TeiEmbeddingProvider({ baseUrl: config.teiUrl, timeoutMs: config.timeoutMs });
+const reference = new TransformersJsReferenceProvider({ cacheDir: config.cacheDir, offline: options.offline });
 const qdrant = new ReadOnlyQdrantStore({
   url: config.qdrantUrl,
   collection: config.collection,
@@ -54,10 +54,6 @@ const report = await runCompatibilityTest({
   topK: options.topK,
   batchSize: options.batchSize,
   dryRun: options.dryRun,
-  teiImage: config.teiImage,
-  teiImageDigest: config.teiImageDigest,
-  teiBackend: config.teiBackend,
-  modelArtifact: config.modelArtifact,
   inputErrors: [...sample.errors, ...queryInput.errors],
 });
 const paths = await writeCompatibilityReports(resolve(options.report), report);

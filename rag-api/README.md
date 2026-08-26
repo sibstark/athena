@@ -10,16 +10,18 @@ POST /v1/answer → тот же retrieval → ограниченный конт�
 
 ## Проверенный embedding contract
 
-- model: `Xenova/multilingual-e5-small`
-- revision: `761b726dd34fb83930e26aab4e9ac3899aa1fa78`
+- model: `Snowflake/snowflake-arctic-embed-m-v2.0`
+- revision: `95c2741480856aa9666782eb4afe11959938017f`
 - query input: ровно один префикс `query: `
-- pooling: `mean`
+- document input: без префикса
+- pooling: `cls`
 - normalization: `true`
-- dimension: `384`
+- dimension: `768`
+- max input: `8192`
 - truncation: запрещён
-- collection: `methodology_e5_small_v1`, Cosine
+- distance: Cosine
 
-Перед embedding клиент проверяет `/info` и `/tokenize`, затем вызывает `/embed` с `normalize=true` и `truncate=false`. Это повторяет прошедший `PASS_STRICT` compatibility test из `tei/`.
+Перед embedding клиент проверяет `/info` и `/tokenize`, затем вызывает `/embed` строго по контракту. Readiness дополнительно сверяет размерность, distance и все contract-поля metadata эталонной Qdrant-коллекции.
 
 ## Конфигурация
 
@@ -51,25 +53,25 @@ openssl rand -base64 32
 
 Основные настройки:
 
-| Переменная | Default |
-|---|---|
-| `HTTP_ADDR` | code default `:8080`; root `.env.example` uses `:8090` for host run |
-| `RAG_API_PORT` | `8090` (host Docker) |
-| `AUTH_SESSION_TTL` | `24h` |
-| `AUTH_COOKIE_SECURE` | `false` локально; `true` только с HTTPS |
-| `TEI_URL` | `http://127.0.0.1:8080` на host |
-| `QDRANT_URL` | `http://127.0.0.1:6333` на host |
-| `QDRANT_COLLECTION` | `methodology_e5_small_v1`; эталонная коллекция для readiness-проверки, не fallback поисковых запросов |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` |
-| `DEEPSEEK_THINKING_ENABLED` | `false` |
-| `DEEPSEEK_MAX_OUTPUT_TOKENS` | `1200` |
-| `DEEPSEEK_MAX_CONCURRENCY` | `4` |
-| `RAG_DEFAULT_TOP_K` / `RAG_MAX_TOP_K` | `8` / `20` |
-| `RAG_SCORE_THRESHOLD` | `0.65` |
-| `RAG_MAX_QUERY_CHARS` | `4000` |
-| `RAG_MAX_CONTEXT_CHARS` | `30000` |
-| `RAG_MAX_CONTEXT_CHUNKS` | `8` |
+| Переменная                            | Default                                                                                               |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `HTTP_ADDR`                           | code default `:8080`; root `.env.example` uses `:8090` for host run                                   |
+| `RAG_API_PORT`                        | `8090` (host Docker)                                                                                  |
+| `AUTH_SESSION_TTL`                    | `24h`                                                                                                 |
+| `AUTH_COOKIE_SECURE`                  | `false` локально; `true` только с HTTPS                                                               |
+| `TEI_URL`                             | `http://127.0.0.1:8080` на host                                                                       |
+| `QDRANT_URL`                          | `http://127.0.0.1:6333` на host                                                                       |
+| `QDRANT_COLLECTION`                   | `methodology_e5_small_v1`; эталонная коллекция для readiness-проверки, не fallback поисковых запросов |
+| `DEEPSEEK_BASE_URL`                   | `https://api.deepseek.com`                                                                            |
+| `DEEPSEEK_MODEL`                      | `deepseek-v4-flash`                                                                                   |
+| `DEEPSEEK_THINKING_ENABLED`           | `false`                                                                                               |
+| `DEEPSEEK_MAX_OUTPUT_TOKENS`          | `1200`                                                                                                |
+| `DEEPSEEK_MAX_CONCURRENCY`            | `4`                                                                                                   |
+| `RAG_DEFAULT_TOP_K` / `RAG_MAX_TOP_K` | `8` / `20`                                                                                            |
+| `RAG_SCORE_THRESHOLD`                 | `0.65`                                                                                                |
+| `RAG_MAX_QUERY_CHARS`                 | `4000`                                                                                                |
+| `RAG_MAX_CONTEXT_CHARS`               | `30000`                                                                                               |
+| `RAG_MAX_CONTEXT_CHUNKS`              | `8`                                                                                                   |
 
 В Compose внутренние URL автоматически заменяются на `http://embeddings:80` и `http://qdrant:6333`. CORS выключен, пока `CORS_ALLOWED_ORIGINS` не содержит явный CSV-список origins.
 
@@ -182,10 +184,7 @@ curl -sS http://127.0.0.1:8090/v1/answer \
 ```json
 {
   "query": "Какие правила начисления зарплаты?",
-  "collections": [
-    "methodology_e5_small_v1",
-    "salary_e5_small_v1"
-  ]
+  "collections": ["methodology_e5_small_v1", "salary_e5_small_v1"]
 }
 ```
 

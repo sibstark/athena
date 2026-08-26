@@ -1,17 +1,31 @@
-import { access, mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  access,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import {
   chunkNormalizedDocuments,
   type ChunkReport,
   type TokenCounter,
 } from "./chunker.js";
 import {
-  createE5TokenCounter,
-  DEFAULT_TOKENIZER,
-  DEFAULT_TOKENIZER_CONFIG_SHA256,
-  DEFAULT_TOKENIZER_REVISION,
-  DEFAULT_TOKENIZER_SHA256,
-} from "./e5-token-counter.js";
+  loadChunkEmbeddingConfig,
+  type ChunkEmbeddingConfig,
+} from "./embedding-config.js";
+import { createPinnedTokenCounter } from "./token-counter.js";
 
 export const CHUNKS_MANIFEST_FORMAT_VERSION = 2;
 
@@ -24,6 +38,7 @@ export interface ChunkRunOptions {
   overlapTokens?: number;
   tokenizerCacheDir?: string;
   tokenCounter?: TokenCounter;
+  embeddingConfig?: ChunkEmbeddingConfig;
   now?: () => Date;
   onProgress?: (message: string) => void;
 }
@@ -48,14 +63,25 @@ export interface ChunksManifest {
   generatedAt: string;
   sourceRun: string;
   sourceNormalization: string;
-  tokenizer: { model: string; revision: string; sha256: string; configSha256: string };
-  limits: { targetTokens: number; maxTokens: number; minTokens: number; overlapTokens: number };
+  tokenizer: {
+    model: string;
+    revision: string;
+    sha256: string;
+    configSha256: string;
+  };
+  limits: {
+    targetTokens: number;
+    maxTokens: number;
+    minTokens: number;
+    overlapTokens: number;
+  };
   workspaces: ChunkWorkspaceManifest[];
 }
 
 export interface ChunkRunReport {
   formatVersion: number;
-  status: "complete" | "complete_with_warnings" | "complete_with_errors" | "failed";
+  status:
+    "complete" | "complete_with_warnings" | "complete_with_errors" | "failed";
   sourceRun: string;
   sourceNormalization: string;
   startedAt: string;
@@ -96,12 +122,9 @@ interface NormalizationWorkspace {
   errors: number;
 }
 
-const DEFAULT_TARGET_TOKENS = 320;
-const DEFAULT_MAX_TOKENS = 450;
-const DEFAULT_MIN_TOKENS = 80;
-const DEFAULT_OVERLAP_TOKENS = 50;
-
-export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<ChunkRunResult> {
+export async function chunkNormalizedRun(
+  options: ChunkRunOptions,
+): Promise<ChunkRunResult> {
   const started = (options.now ?? (() => new Date()))();
   const runDir = resolve(options.runDir);
   const outputDir = resolve(options.outputDir);
@@ -111,52 +134,83 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
   const sourceNormalization = basename(runDir);
   const inputMatch = /^normalized_(.+)$/u.exec(sourceNormalization);
   if (!inputMatch?.[1]) {
-    throw new Error(`Normalized input directory must be named normalized_<id>: ${runDir}`);
+    throw new Error(
+      `Normalized input directory must be named normalized_<id>: ${runDir}`,
+    );
   }
   const suffix = inputMatch[1];
   if (basename(outputDir) !== `chunks_${suffix}`) {
-    throw new Error(`Chunks output directory must be named chunks_${suffix}: ${outputDir}`);
+    throw new Error(
+      `Chunks output directory must be named chunks_${suffix}: ${outputDir}`,
+    );
   }
 
   const manifest = await readNormalizationManifest(runDir);
   if (manifest.sourceRun !== `run_${suffix}`) {
-    throw new Error(`Normalization manifest belongs to ${manifest.sourceRun}, expected run_${suffix}.`);
+    throw new Error(
+      `Normalization manifest belongs to ${manifest.sourceRun}, expected run_${suffix}.`,
+    );
   }
   validateWorkspaces(manifest.workspaces);
 
+  const embeddingConfig = options.embeddingConfig ?? loadChunkEmbeddingConfig();
   const limits = {
-    targetTokens: options.targetTokens ?? DEFAULT_TARGET_TOKENS,
-    maxTokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
-    minTokens: options.minTokens ?? DEFAULT_MIN_TOKENS,
-    overlapTokens: options.overlapTokens ?? DEFAULT_OVERLAP_TOKENS,
+    targetTokens: options.targetTokens ?? embeddingConfig.targetTokens,
+    maxTokens: options.maxTokens ?? embeddingConfig.maxTokens,
+    minTokens: options.minTokens ?? embeddingConfig.minTokens,
+    overlapTokens: options.overlapTokens ?? embeddingConfig.overlapTokens,
   };
   validateLimits(limits);
-  const tokenCounter = options.tokenCounter ?? await createE5TokenCounter({
-    modelId: DEFAULT_TOKENIZER,
-    revision: DEFAULT_TOKENIZER_REVISION,
-    cacheDir: options.tokenizerCacheDir ?? process.env.EMBEDDING_CACHE_DIR?.trim() ?? "../var/models",
-  });
+  const tokenCounter =
+    options.tokenCounter ??
+    (await createPinnedTokenCounter({
+      modelId: embeddingConfig.modelId,
+      revision: embeddingConfig.revision,
+      tokenizerSha256: embeddingConfig.tokenizerSha256,
+      tokenizerConfigSha256: embeddingConfig.tokenizerConfigSha256,
+      cacheDir:
+        options.tokenizerCacheDir ??
+        process.env.EMBEDDING_CACHE_DIR?.trim() ??
+        "../var/models",
+    }));
 
   await mkdir(dirname(outputDir), { recursive: true });
-  const staging = await mkdtemp(join(dirname(outputDir), `.${basename(outputDir)}.tmp-`));
+  const staging = await mkdtemp(
+    join(dirname(outputDir), `.${basename(outputDir)}.tmp-`),
+  );
   let published = false;
   try {
     const workspaceResults: ChunkWorkspaceManifest[] = [];
     for (const [index, workspace] of manifest.workspaces.entries()) {
-      log(`[${index + 1}/${manifest.workspaces.length}] Chunking workspace ${workspace.name} (${workspace.id})...`);
+      log(
+        `[${index + 1}/${manifest.workspaces.length}] Chunking workspace ${workspace.name} (${workspace.id})...`,
+      );
       const result = await processWorkspace({
-        runDir, staging, workspace, tokenCounter, limits,
+        runDir,
+        staging,
+        workspace,
+        tokenCounter,
+        limits,
         onProgress: (message) => log(`  ${message}`),
       });
       workspaceResults.push(result);
     }
 
-    const warning = workspaceResults.filter((item) => item.status === "complete_with_warnings").length;
-    const successful = workspaceResults.filter((item) => item.status !== "failed").length;
+    const warning = workspaceResults.filter(
+      (item) => item.status === "complete_with_warnings",
+    ).length;
+    const successful = workspaceResults.filter(
+      (item) => item.status !== "failed",
+    ).length;
     const failed = workspaceResults.length - successful;
-    const status = failed > 0
-      ? successful === 0 ? "failed" : "complete_with_errors"
-      : warning > 0 ? "complete_with_warnings" : "complete";
+    const status =
+      failed > 0
+        ? successful === 0
+          ? "failed"
+          : "complete_with_errors"
+        : warning > 0
+          ? "complete_with_warnings"
+          : "complete";
     const finished = (options.now ?? (() => new Date()))();
     const chunksManifest: ChunksManifest = {
       formatVersion: CHUNKS_MANIFEST_FORMAT_VERSION,
@@ -164,10 +218,10 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
       sourceRun: manifest.sourceRun,
       sourceNormalization,
       tokenizer: {
-        model: DEFAULT_TOKENIZER,
-        revision: DEFAULT_TOKENIZER_REVISION,
-        sha256: DEFAULT_TOKENIZER_SHA256,
-        configSha256: DEFAULT_TOKENIZER_CONFIG_SHA256,
+        model: embeddingConfig.modelId,
+        revision: embeddingConfig.revision,
+        sha256: embeddingConfig.tokenizerSha256,
+        configSha256: embeddingConfig.tokenizerConfigSha256,
       },
       limits,
       workspaces: workspaceResults,
@@ -191,7 +245,10 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
     };
     const manifestFile = join(staging, "chunks_manifest.json");
     const reportFile = join(staging, "chunks_report.json");
-    await Promise.all([writeJSON(manifestFile, chunksManifest), writeJSON(reportFile, report)]);
+    await Promise.all([
+      writeJSON(manifestFile, chunksManifest),
+      writeJSON(reportFile, report),
+    ]);
     await publishDirectory(staging, outputDir);
     published = true;
     return {
@@ -211,7 +268,12 @@ async function processWorkspace(options: {
   staging: string;
   workspace: NormalizationWorkspace;
   tokenCounter: TokenCounter;
-  limits: { targetTokens: number; maxTokens: number; minTokens: number; overlapTokens: number };
+  limits: {
+    targetTokens: number;
+    maxTokens: number;
+    minTokens: number;
+    overlapTokens: number;
+  };
   onProgress: (message: string) => void;
 }): Promise<ChunkWorkspaceManifest> {
   const { workspace } = options;
@@ -223,7 +285,10 @@ async function processWorkspace(options: {
   const reportFile = join(options.staging, reportRelative);
   await mkdir(outputDir, { recursive: true });
 
-  const base: Omit<ChunkWorkspaceManifest, "status" | "processedDocuments" | "chunksCreated" | "errors"> = {
+  const base: Omit<
+    ChunkWorkspaceManifest,
+    "status" | "processedDocuments" | "chunksCreated" | "errors"
+  > = {
     id: workspace.id,
     name: workspace.name,
     path: outputPath,
@@ -232,16 +297,29 @@ async function processWorkspace(options: {
     reportPath: reportRelative,
   };
   if (workspace.status === "failed" || workspace.errors > 0) {
-    const message = workspace.errors > 0
-      ? `Upstream normalization contains ${workspace.errors} error(s).`
-      : "Upstream normalization status is failed.";
-    await writeJSON(reportFile, failureReport(options.tokenCounter.name, options.limits, message));
-    return { ...base, status: "failed", processedDocuments: 0, chunksCreated: 0, errors: 1, error: message };
+    const message =
+      workspace.errors > 0
+        ? `Upstream normalization contains ${workspace.errors} error(s).`
+        : "Upstream normalization status is failed.";
+    await writeJSON(
+      reportFile,
+      failureReport(options.tokenCounter.name, options.limits, message),
+    );
+    return {
+      ...base,
+      status: "failed",
+      processedDocuments: 0,
+      chunksCreated: 0,
+      errors: 1,
+      error: message,
+    };
   }
 
   try {
     if (!workspace.normalizedPath || !workspace.treePath) {
-      throw new Error("Normalization manifest does not declare normalizedPath and treePath.");
+      throw new Error(
+        "Normalization manifest does not declare normalizedPath and treePath.",
+      );
     }
     const inputFile = resolveWithin(options.runDir, workspace.normalizedPath);
     const treeFile = resolveWithin(options.runDir, workspace.treePath);
@@ -262,131 +340,264 @@ async function processWorkspace(options: {
       if (result.report.processed_documents === 0) {
         await rm(chunksFile, { force: true });
         return {
-          ...base, status: "failed", processedDocuments: 0,
-          chunksCreated: 0, errors: result.report.errors, error: message,
+          ...base,
+          status: "failed",
+          processedDocuments: 0,
+          chunksCreated: 0,
+          errors: result.report.errors,
+          error: message,
         };
       }
       return {
-        ...base, chunksPath: chunksRelative, status: "complete_with_warnings",
+        ...base,
+        chunksPath: chunksRelative,
+        status: "complete_with_warnings",
         processedDocuments: result.report.processed_documents,
-        chunksCreated: result.report.chunks_created, errors: result.report.errors, error: message,
+        chunksCreated: result.report.chunks_created,
+        errors: result.report.errors,
+        error: message,
       };
     }
     return {
-      ...base, chunksPath: chunksRelative, status: "complete",
+      ...base,
+      chunksPath: chunksRelative,
+      status: "complete",
       processedDocuments: result.report.processed_documents,
-      chunksCreated: result.report.chunks_created, errors: 0,
+      chunksCreated: result.report.chunks_created,
+      errors: 0,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await rm(chunksFile, { force: true });
-    await writeJSON(reportFile, failureReport(options.tokenCounter.name, options.limits, message));
-    return { ...base, status: "failed", processedDocuments: 0, chunksCreated: 0, errors: 1, error: message };
+    await writeJSON(
+      reportFile,
+      failureReport(options.tokenCounter.name, options.limits, message),
+    );
+    return {
+      ...base,
+      status: "failed",
+      processedDocuments: 0,
+      chunksCreated: 0,
+      errors: 1,
+      error: message,
+    };
   }
 }
 
-async function readNormalizationManifest(runDir: string): Promise<NormalizationManifest> {
+async function readNormalizationManifest(
+  runDir: string,
+): Promise<NormalizationManifest> {
   const path = join(runDir, "normalization_manifest.json");
   let value: unknown;
   try {
     value = JSON.parse(await readFile(path, "utf8"));
   } catch (error) {
-    throw new Error(`Cannot read normalization manifest ${path}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Cannot read normalization manifest ${path}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  if (!isRecord(value) || value.formatVersion !== 1 || typeof value.sourceRun !== "string" || !Array.isArray(value.workspaces)) {
+  if (
+    !isRecord(value) ||
+    value.formatVersion !== 1 ||
+    typeof value.sourceRun !== "string" ||
+    !Array.isArray(value.workspaces)
+  ) {
     throw new Error(`Invalid normalization manifest: ${path}`);
   }
   return value as unknown as NormalizationManifest;
 }
 
 function validateWorkspaces(workspaces: NormalizationWorkspace[]): void {
-  if (workspaces.length === 0) throw new Error("Normalization manifest contains no workspaces.");
+  if (workspaces.length === 0)
+    throw new Error("Normalization manifest contains no workspaces.");
   const ids = new Set<number>();
   const paths = new Set<string>();
   const collections = new Set<string>();
   for (const [index, workspace] of workspaces.entries()) {
-    if (!isRecord(workspace) || !Number.isInteger(workspace.id) || workspace.id <= 0 ||
-      typeof workspace.name !== "string" || !workspace.name.trim() ||
-      typeof workspace.path !== "string" || workspace.path !== `workspace_${workspace.id}` ||
-      typeof workspace.qdrantCollection !== "string" || !workspace.qdrantCollection.trim() ||
-      !["complete", "complete_with_warnings", "failed"].includes(workspace.status) ||
-      !Number.isInteger(workspace.errors) || workspace.errors < 0) {
-      throw new Error(`Normalization manifest workspace ${index + 1} is invalid.`);
+    if (
+      !isRecord(workspace) ||
+      !Number.isInteger(workspace.id) ||
+      workspace.id <= 0 ||
+      typeof workspace.name !== "string" ||
+      !workspace.name.trim() ||
+      typeof workspace.path !== "string" ||
+      workspace.path !== `workspace_${workspace.id}` ||
+      typeof workspace.qdrantCollection !== "string" ||
+      !workspace.qdrantCollection.trim() ||
+      !["complete", "complete_with_warnings", "failed"].includes(
+        workspace.status,
+      ) ||
+      !Number.isInteger(workspace.errors) ||
+      workspace.errors < 0
+    ) {
+      throw new Error(
+        `Normalization manifest workspace ${index + 1} is invalid.`,
+      );
     }
     assertPortableRelative(workspace.path, `workspace ${workspace.id} path`);
     if (workspace.normalizedPath !== undefined) {
-      assertPortableRelative(workspace.normalizedPath, `workspace ${workspace.id} normalizedPath`);
-      if (workspace.normalizedPath !== portableJoin(workspace.path, "normalized.jsonl")) {
-        throw new Error(`Workspace ${workspace.id} normalizedPath must point to its normalized.jsonl.`);
+      assertPortableRelative(
+        workspace.normalizedPath,
+        `workspace ${workspace.id} normalizedPath`,
+      );
+      if (
+        workspace.normalizedPath !==
+        portableJoin(workspace.path, "normalized.jsonl")
+      ) {
+        throw new Error(
+          `Workspace ${workspace.id} normalizedPath must point to its normalized.jsonl.`,
+        );
       }
     }
     if (workspace.treePath !== undefined) {
-      assertPortableRelative(workspace.treePath, `workspace ${workspace.id} treePath`);
-      if (workspace.treePath !== portableJoin(workspace.path, "document_tree.json")) {
-        throw new Error(`Workspace ${workspace.id} treePath must point to its document_tree.json.`);
+      assertPortableRelative(
+        workspace.treePath,
+        `workspace ${workspace.id} treePath`,
+      );
+      if (
+        workspace.treePath !==
+        portableJoin(workspace.path, "document_tree.json")
+      ) {
+        throw new Error(
+          `Workspace ${workspace.id} treePath must point to its document_tree.json.`,
+        );
       }
     }
-    if (ids.has(workspace.id)) throw new Error(`Duplicate workspace id: ${workspace.id}.`);
-    if (paths.has(workspace.path)) throw new Error(`Duplicate workspace path: ${workspace.path}.`);
-    if (collections.has(workspace.qdrantCollection)) throw new Error(`Duplicate qdrantCollection: ${workspace.qdrantCollection}.`);
+    if (ids.has(workspace.id))
+      throw new Error(`Duplicate workspace id: ${workspace.id}.`);
+    if (paths.has(workspace.path))
+      throw new Error(`Duplicate workspace path: ${workspace.path}.`);
+    if (collections.has(workspace.qdrantCollection))
+      throw new Error(
+        `Duplicate qdrantCollection: ${workspace.qdrantCollection}.`,
+      );
     ids.add(workspace.id);
     paths.add(workspace.path);
     collections.add(workspace.qdrantCollection);
   }
 }
 
-function failureReport(tokenizer: string, limits: { targetTokens: number; maxTokens: number; minTokens: number; overlapTokens: number }, message: string): ChunkReport {
+function failureReport(
+  tokenizer: string,
+  limits: {
+    targetTokens: number;
+    maxTokens: number;
+    minTokens: number;
+    overlapTokens: number;
+  },
+  message: string,
+): ChunkReport {
   return {
-    input_documents: 0, processed_documents: 0, skipped_documents: 0, chunks_created: 0,
-    tokenizer, target_tokens: limits.targetTokens, max_tokens: limits.maxTokens,
-    min_tokens: limits.minTokens, overlap_tokens: limits.overlapTokens,
-    average_tokens: 0, minimum_tokens: 0, maximum_tokens: 0,
-    chunks_below_min_tokens: 0, chunks_above_max_tokens: 0, chunks_with_tables: 0,
-    chunks_with_code: 0, chunks_with_images: 0, duplicate_chunks: 0,
-    control_character_replacements: 0, errors: 1, skipped: [],
-    control_character_warnings: [], oversized_chunks: [],
+    input_documents: 0,
+    processed_documents: 0,
+    skipped_documents: 0,
+    chunks_created: 0,
+    tokenizer,
+    target_tokens: limits.targetTokens,
+    max_tokens: limits.maxTokens,
+    min_tokens: limits.minTokens,
+    overlap_tokens: limits.overlapTokens,
+    average_tokens: 0,
+    minimum_tokens: 0,
+    maximum_tokens: 0,
+    chunks_below_min_tokens: 0,
+    chunks_above_max_tokens: 0,
+    chunks_with_tables: 0,
+    chunks_with_code: 0,
+    chunks_with_images: 0,
+    duplicate_chunks: 0,
+    control_character_replacements: 0,
+    errors: 1,
+    skipped: [],
+    control_character_warnings: [],
+    oversized_chunks: [],
     error_documents: [{ line: 0, document_id: null, source: null, message }],
   };
 }
 
-function validateLimits(limits: { targetTokens: number; maxTokens: number; minTokens: number; overlapTokens: number }): void {
-  if (![limits.targetTokens, limits.maxTokens, limits.minTokens].every((value) => Number.isInteger(value) && value > 0) ||
-    !Number.isInteger(limits.overlapTokens) || limits.overlapTokens < 0) {
-    throw new Error("Token limits must be integers and overlap must be non-negative.");
+function validateLimits(limits: {
+  targetTokens: number;
+  maxTokens: number;
+  minTokens: number;
+  overlapTokens: number;
+}): void {
+  if (
+    ![limits.targetTokens, limits.maxTokens, limits.minTokens].every(
+      (value) => Number.isInteger(value) && value > 0,
+    ) ||
+    !Number.isInteger(limits.overlapTokens) ||
+    limits.overlapTokens < 0
+  ) {
+    throw new Error(
+      "Token limits must be integers and overlap must be non-negative.",
+    );
   }
-  if (limits.minTokens > limits.targetTokens || limits.targetTokens > limits.maxTokens) {
-    throw new Error("Token limits must satisfy minTokens <= targetTokens <= maxTokens.");
+  if (
+    limits.minTokens > limits.targetTokens ||
+    limits.targetTokens > limits.maxTokens
+  ) {
+    throw new Error(
+      "Token limits must satisfy minTokens <= targetTokens <= maxTokens.",
+    );
   }
-  if (limits.overlapTokens >= limits.targetTokens) throw new Error("overlapTokens must be smaller than targetTokens.");
+  if (limits.overlapTokens >= limits.targetTokens)
+    throw new Error("overlapTokens must be smaller than targetTokens.");
 }
 
 function validateSeparatedPaths(runDir: string, outputDir: string): void {
-  if (runDir === outputDir || isWithin(runDir, outputDir) || isWithin(outputDir, runDir)) {
-    throw new Error("Normalized input and chunks output directories must not contain one another.");
+  if (
+    runDir === outputDir ||
+    isWithin(runDir, outputDir) ||
+    isWithin(outputDir, runDir)
+  ) {
+    throw new Error(
+      "Normalized input and chunks output directories must not contain one another.",
+    );
   }
 }
 
 function isWithin(parent: string, child: string): boolean {
   const value = relative(parent, child);
-  return value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !isAbsolute(value);
+  return (
+    value !== "" &&
+    value !== ".." &&
+    !value.startsWith(`..${sep}`) &&
+    !isAbsolute(value)
+  );
 }
 
 function resolveWithin(root: string, value: string): string {
   assertPortableRelative(value, "Manifest path");
   const result = resolve(root, value);
-  if (!isWithin(root, result)) throw new Error(`Manifest path must point inside the normalized run: ${value}`);
+  if (!isWithin(root, result))
+    throw new Error(
+      `Manifest path must point inside the normalized run: ${value}`,
+    );
   return result;
 }
 
 function assertPortableRelative(value: string, label: string): void {
-  if (!value || isAbsolute(value) || /^[A-Za-z]:[\\/]/u.test(value) || value.includes("\\") ||
-    value === ".." || value.startsWith("../") || value.split("/").includes("..")) {
+  if (
+    !value ||
+    isAbsolute(value) ||
+    /^[A-Za-z]:[\\/]/u.test(value) ||
+    value.includes("\\") ||
+    value === ".." ||
+    value.startsWith("../") ||
+    value.split("/").includes("..")
+  ) {
     throw new Error(`${label} must be a portable relative path: ${value}`);
   }
 }
 
-async function publishDirectory(staging: string, target: string): Promise<void> {
-  const backup = join(dirname(target), `.${basename(target)}.backup-${process.pid}-${Date.now()}`);
+async function publishDirectory(
+  staging: string,
+  target: string,
+): Promise<void> {
+  const backup = join(
+    dirname(target),
+    `.${basename(target)}.backup-${process.pid}-${Date.now()}`,
+  );
   const exists = await pathExists(target);
   try {
     if (exists) await rename(target, backup);
@@ -394,7 +605,7 @@ async function publishDirectory(staging: string, target: string): Promise<void> 
     if (exists) await rm(backup, { recursive: true, force: true });
   } catch (error) {
     await rm(target, { recursive: true, force: true });
-    if (exists && await pathExists(backup)) await rename(backup, target);
+    if (exists && (await pathExists(backup))) await rename(backup, target);
     throw error;
   }
 }
@@ -417,7 +628,10 @@ function portableJoin(...parts: string[]): string {
   return parts.join("/");
 }
 
-function sum(items: ChunkWorkspaceManifest[], key: "processedDocuments" | "chunksCreated" | "errors"): number {
+function sum(
+  items: ChunkWorkspaceManifest[],
+  key: "processedDocuments" | "chunksCreated" | "errors",
+): number {
   return items.reduce((total, item) => total + item[key], 0);
 }
 

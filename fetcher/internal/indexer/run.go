@@ -46,7 +46,7 @@ func IndexRun(ctx context.Context, config RunConfig, dependencies Dependencies) 
 	}
 	provider := dependencies.Provider
 	if provider == nil {
-		provider = NewTEIClient(config.TEIURL, config.TEITimeout)
+		provider = NewTEIClient(config.TEIURL, config.TEITimeout, config.Contract)
 	}
 	store := dependencies.Store
 	if store == nil {
@@ -74,10 +74,11 @@ func IndexRun(ctx context.Context, config RunConfig, dependencies Dependencies) 
 			continue
 		}
 		workspaceConfig := Config{
+			Contract:  config.Contract,
 			InputFile: paths.chunks, ReportFile: paths.indexReport, Collection: workspace.QdrantCollection,
 			QdrantURL: config.QdrantURL, QdrantAPIKey: config.QdrantAPIKey, QdrantTimeout: config.QdrantTimeout,
 			TEIURL: config.TEIURL, TEITimeout: config.TEITimeout, BatchSize: config.BatchSize,
-			PipelineVersion: config.PipelineVersion, VectorCacheSize: config.VectorCacheSize,
+			VectorCacheSize:    config.VectorCacheSize,
 			StoreEmbeddingText: config.StoreEmbeddingText, DryRun: config.DryRun,
 			ForceReembed: config.ForceReembed, Prune: true, ContinueOnError: config.ContinueOnError,
 			LogLevel: config.LogLevel, Progress: config.Progress,
@@ -319,15 +320,14 @@ func writeRunReport(path string, report RunReport) error {
 }
 
 func normalizeRunConfig(config *RunConfig) {
-	base := Config{QdrantURL: config.QdrantURL, QdrantTimeout: config.QdrantTimeout, TEIURL: config.TEIURL, TEITimeout: config.TEITimeout,
-		BatchSize: config.BatchSize, PipelineVersion: config.PipelineVersion, VectorCacheSize: config.VectorCacheSize}
+	base := Config{Contract: config.Contract, QdrantURL: config.QdrantURL, QdrantTimeout: config.QdrantTimeout, TEIURL: config.TEIURL, TEITimeout: config.TEITimeout,
+		BatchSize: config.BatchSize, VectorCacheSize: config.VectorCacheSize}
 	normalizeConfig(&base)
 	config.QdrantURL = base.QdrantURL
 	config.QdrantTimeout = base.QdrantTimeout
 	config.TEIURL = base.TEIURL
 	config.TEITimeout = base.TEITimeout
 	config.BatchSize = base.BatchSize
-	config.PipelineVersion = base.PipelineVersion
 	config.VectorCacheSize = base.VectorCacheSize
 	if config.ReportFile == "" {
 		config.ReportFile = filepath.Join(config.RunDir, "index-report.json")

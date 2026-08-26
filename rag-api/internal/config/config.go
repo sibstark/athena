@@ -1,17 +1,24 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+	"github.com/sibstark/athena/rag-api/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
 
+var embeddingUUIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$`)
+
 type Config struct {
+	Embedding         models.EmbeddingContract
 	HTTPAddr          string
 	HTTPMaxBodyBytes  int64
 	ReadHeaderTimeout time.Duration
@@ -53,10 +60,18 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	if err := loadRootEnvironment(); err != nil {
+		return Config{}, err
+	}
 	if err := validateEnvironmentSyntax(); err != nil {
 		return Config{}, err
 	}
+	embedding, err := loadEmbeddingContract()
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
+		Embedding:               embedding,
 		HTTPAddr:                env("HTTP_ADDR", ":8080"),
 		HTTPMaxBodyBytes:        int64(envInt("HTTP_MAX_BODY_BYTES", 1<<20)),
 		ReadHeaderTimeout:       envDuration("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
@@ -96,6 +111,119 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func loadRootEnvironment() error {
+	for _, path := range []string{".env", "../.env"} {
+		if _, err := os.Stat(path); err == nil {
+			if err := godotenv.Load(path); err != nil {
+				return fmt.Errorf("load %s: %w", path, err)
+			}
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func loadEmbeddingContract() (models.EmbeddingContract, error) {
+	modelID, err := requiredEnv("EMBEDDING_MODEL_ID", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	revision, err := requiredEnv("EMBEDDING_MODEL_REVISION", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	dimension, err := requiredPositiveInt("EMBEDDING_DIMENSION")
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	dtype, err := requiredEnv("EMBEDDING_DTYPE", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	pooling, err := requiredEnv("EMBEDDING_POOLING", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	normalized, err := requiredBool("EMBEDDING_NORMALIZED")
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	documentPrefix, err := requiredEnv("EMBEDDING_DOCUMENT_PREFIX", true)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	queryPrefix, err := requiredEnv("EMBEDDING_QUERY_PREFIX", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	maxTokens, err := requiredPositiveInt("EMBEDDING_MAX_INPUT_TOKENS")
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	autoTruncate, err := requiredBool("EMBEDDING_AUTO_TRUNCATE")
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	pipelineVersion, err := requiredEnv("EMBEDDING_PIPELINE_VERSION", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	pointNamespace, err := requiredEnv("EMBEDDING_POINT_NAMESPACE", false)
+	if err != nil {
+		return models.EmbeddingContract{}, err
+	}
+	contract := models.EmbeddingContract{
+		ModelID: modelID, Revision: revision, Dimension: dimension, DType: dtype,
+		Pooling: pooling, Normalized: normalized, DocumentPrefix: documentPrefix,
+		QueryPrefix: queryPrefix, MaxInputTokens: maxTokens, AutoTruncate: autoTruncate,
+		PipelineVersion: pipelineVersion, PointNamespace: pointNamespace,
+	}
+	if contract.Pooling != "cls" && contract.Pooling != "mean" && contract.Pooling != "last_token" {
+		return models.EmbeddingContract{}, fmt.Errorf("EMBEDDING_POOLING is unsupported: %s", contract.Pooling)
+	}
+	if !embeddingUUIDPattern.MatchString(contract.PointNamespace) {
+		return models.EmbeddingContract{}, fmt.Errorf("EMBEDDING_POINT_NAMESPACE must be a UUID")
+	}
+	return contract, nil
+}
+
+func requiredEnv(name string, allowEmpty bool) (string, error) {
+	value, exists := os.LookupEnv(name)
+	if !exists {
+		return "", fmt.Errorf("%s is required", name)
+	}
+	if !allowEmpty && strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("%s must not be empty", name)
+	}
+	return value, nil
+}
+
+func requiredPositiveInt(name string) (int, error) {
+	value, err := requiredEnv(name, false)
+	if err != nil {
+		return 0, err
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return parsed, nil
+}
+
+func requiredBool(name string) (bool, error) {
+	value, err := requiredEnv(name, false)
+	if err != nil {
+		return false, err
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
+	return parsed, nil
 }
 
 func (c Config) Validate() error {

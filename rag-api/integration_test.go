@@ -16,8 +16,9 @@ func TestRealTEIAndQdrant(t *testing.T) {
 	if os.Getenv("RUN_RAG_API_INTEGRATION") != "1" {
 		t.Skip("set RUN_RAG_API_INTEGRATION=1")
 	}
-	teiClient := tei.New(env("TEI_URL", "http://127.0.0.1:8080"), 30*time.Second, nil)
-	qdrantClient := qdrant.New(env("QDRANT_URL", "http://127.0.0.1:6333"), os.Getenv("QDRANT_API_KEY"), env("QDRANT_COLLECTION", "methodology_e5_small_v1"), 10*time.Second, nil)
+	contract := integrationContract(t)
+	teiClient := tei.New(env("TEI_URL", "http://127.0.0.1:8080"), 30*time.Second, contract, nil)
+	qdrantClient := qdrant.New(env("QDRANT_URL", "http://127.0.0.1:6333"), os.Getenv("QDRANT_API_KEY"), env("QDRANT_COLLECTION", "methodology_e5_small_v1"), 10*time.Second, contract, nil)
 	if err := teiClient.Ready(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +35,39 @@ func TestRealTEIAndQdrant(t *testing.T) {
 	}
 	if len(hits) == 0 {
 		t.Fatal("real search returned no hits")
+	}
+}
+
+func integrationContract(t *testing.T) models.EmbeddingContract {
+	t.Helper()
+	required := func(name string, allowEmpty bool) string {
+		value, exists := os.LookupEnv(name)
+		if !exists || (!allowEmpty && value == "") {
+			t.Fatalf("%s is required", name)
+		}
+		return value
+	}
+	integer := func(name string) int {
+		value, err := strconv.Atoi(required(name, false))
+		if err != nil || value <= 0 {
+			t.Fatalf("%s must be a positive integer", name)
+		}
+		return value
+	}
+	boolean := func(name string) bool {
+		value, err := strconv.ParseBool(required(name, false))
+		if err != nil {
+			t.Fatalf("%s must be true or false", name)
+		}
+		return value
+	}
+	return models.EmbeddingContract{
+		ModelID: required("EMBEDDING_MODEL_ID", false), Revision: required("EMBEDDING_MODEL_REVISION", false),
+		Dimension: integer("EMBEDDING_DIMENSION"), DType: required("EMBEDDING_DTYPE", false),
+		Pooling: required("EMBEDDING_POOLING", false), Normalized: boolean("EMBEDDING_NORMALIZED"),
+		DocumentPrefix: required("EMBEDDING_DOCUMENT_PREFIX", true), QueryPrefix: required("EMBEDDING_QUERY_PREFIX", false),
+		MaxInputTokens: integer("EMBEDDING_MAX_INPUT_TOKENS"), AutoTruncate: boolean("EMBEDDING_AUTO_TRUNCATE"),
+		PipelineVersion: required("EMBEDDING_PIPELINE_VERSION", false), PointNamespace: required("EMBEDDING_POINT_NAMESPACE", false),
 	}
 }
 

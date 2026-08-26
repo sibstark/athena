@@ -28,12 +28,15 @@ func Load() (Config, error) {
 // LoadEnvironment loads the optional local .env without requiring Bitrix
 // credentials. Commands such as normalize and index do not use the webhook.
 func LoadEnvironment() error {
-	if _, err := os.Stat(".env"); err == nil {
-		if err := godotenv.Load(".env"); err != nil {
-			return fmt.Errorf("load .env: %w", err)
+	for _, path := range []string{".env", "../.env"} {
+		if _, err := os.Stat(path); err == nil {
+			if err := godotenv.Load(path); err != nil {
+				return fmt.Errorf("load %s: %w", path, err)
+			}
+			return nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect %s: %w", path, err)
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect .env: %w", err)
 	}
 	return nil
 }

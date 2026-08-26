@@ -90,6 +90,10 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err := config.LoadEnvironment(); err != nil {
 		return err
 	}
+	contract, err := indexer.LoadEmbeddingContract()
+	if err != nil {
+		return fmt.Errorf("embedding configuration: %w", err)
+	}
 	batchDefault, err := envPositiveInt("INDEXER_BATCH_SIZE", 16)
 	if err != nil {
 		return err
@@ -151,11 +155,11 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if !validLogLevel(logLevel) {
 		return fmt.Errorf("unknown log level %q", logLevel)
 	}
-	pipelineVersion := envString("EMBEDDING_PIPELINE_VERSION", indexer.DefaultPipeline)
 	vectorCacheSize := cacheDefault
 	common := indexer.RunConfig{
+		Contract:  contract,
 		QdrantURL: qdrantURL, QdrantAPIKey: strings.TrimSpace(os.Getenv("QDRANT_API_KEY")), QdrantTimeout: qdrantTimeout,
-		TEIURL: teiURL, TEITimeout: teiTimeout, BatchSize: batchSize, PipelineVersion: pipelineVersion,
+		TEIURL: teiURL, TEITimeout: teiTimeout, BatchSize: batchSize,
 		VectorCacheSize: vectorCacheSize, StoreEmbeddingText: storeEmbeddingText, DryRun: dryRun,
 		ForceReembed: forceReembed, ContinueOnError: continueOnError, LogLevel: logLevel,
 		Progress: func(message string) { fmt.Fprintln(stdout, message) },
@@ -177,10 +181,11 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return nil
 	}
 	result, err := indexer.Index(ctx, indexer.Config{
+		Contract:  common.Contract,
 		InputFile: input, ReportFile: reportFile, Collection: collection,
 		QdrantURL: common.QdrantURL, QdrantAPIKey: common.QdrantAPIKey, QdrantTimeout: common.QdrantTimeout,
 		TEIURL: common.TEIURL, TEITimeout: common.TEITimeout, BatchSize: common.BatchSize,
-		PipelineVersion: common.PipelineVersion, VectorCacheSize: common.VectorCacheSize,
+		VectorCacheSize:    common.VectorCacheSize,
 		StoreEmbeddingText: common.StoreEmbeddingText, DryRun: common.DryRun, ForceReembed: common.ForceReembed,
 		Prune: prune, ContinueOnError: common.ContinueOnError, LogLevel: common.LogLevel,
 	}, indexer.Dependencies{})
