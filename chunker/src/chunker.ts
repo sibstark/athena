@@ -52,6 +52,7 @@ export class UnicodeHeuristicTokenCounter implements TokenCounter {
 export interface ChunkMetadata {
   title: string | null;
   source: string;
+  document_url: string;
   page_id: string | null;
   parent_page_id: string | null;
   root_page_id: string | null;
@@ -455,6 +456,7 @@ function chunkDocument(
     const metadata: ChunkMetadata = {
       title: document.metadata.title,
       source: document.metadata.source,
+      document_url: document.metadata.document_url,
       page_id: document.metadata.page_id,
       parent_page_id: document.metadata.parent_page_id,
       root_page_id: document.metadata.root_page_id,
@@ -1223,6 +1225,17 @@ function parseNormalizedDocument(line: string): NormalizedDocument {
   const metadata = value.metadata;
   if (typeof metadata.source !== "string" || !metadata.source) {
     throw new Error("metadata.source must be a non-empty string.");
+  }
+  if (typeof metadata.document_url !== "string" || !metadata.document_url.trim()) {
+    throw new Error("metadata.document_url must be a non-empty string.");
+  }
+  try {
+    const documentURL = new URL(metadata.document_url);
+    if (documentURL.protocol !== "http:" && documentURL.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+  } catch {
+    throw new Error("metadata.document_url must be an absolute HTTP(S) URL.");
   }
   if (typeof metadata.indexable !== "boolean") {
     throw new Error("metadata.indexable must be a boolean.");

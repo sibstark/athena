@@ -33,6 +33,19 @@ func TestBuildPayloadGoldenAndBackend(t *testing.T) {
 	}
 }
 
+func TestBuildPayloadIncludesDocumentURL(t *testing.T) {
+	documentURL := "https://hwschool.bitrix24.ru/note/document/3515/"
+	chunk := testChunk("one", "chunk_example")
+	chunk.Metadata.DocumentURL = &documentURL
+	payload, err := buildPayload(chunk, hashText("passage: one"), pipeline("1"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload["document_url"] != documentURL {
+		t.Fatalf("document_url = %#v", payload["document_url"])
+	}
+}
+
 func TestIndexEmbedsThenSkipsUnchanged(t *testing.T) {
 	provider := &fakeProvider{}
 	store := newFakeStore()
@@ -100,6 +113,33 @@ func TestIndexPayloadOnlyUpdatePreservesVector(t *testing.T) {
 	for _, point := range store.points {
 		if &point.Vector[0] != &before[0] {
 			t.Fatal("vector was replaced")
+		}
+	}
+}
+
+func TestIndexAddsDocumentURLWithoutReembedding(t *testing.T) {
+	provider := &fakeProvider{}
+	store := newFakeStore()
+	original := testChunk("one", "chunk_one")
+	config := testConfig(t, []ChunkRecord{original})
+	if _, err := Index(context.Background(), config, Dependencies{Provider: provider, Store: store}); err != nil {
+		t.Fatal(err)
+	}
+	embedCalls := provider.embedCalls
+	documentURL := "https://hwschool.bitrix24.ru/note/document/1/"
+	changed := original
+	changed.Metadata.DocumentURL = &documentURL
+	config = testConfig(t, []ChunkRecord{changed})
+	report, err := Index(context.Background(), config, Dependencies{Provider: provider, Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.PayloadOnlyUpdates != 1 || report.EmbeddedChunks != 0 || provider.embedCalls != embedCalls {
+		t.Fatalf("report=%+v embedCalls=%d", report, provider.embedCalls)
+	}
+	for _, point := range store.points {
+		if point.Payload["document_url"] != documentURL {
+			t.Fatalf("payload=%+v", point.Payload)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -444,6 +445,14 @@ func parseChunk(raw string) (ChunkRecord, error) {
 	if strings.TrimSpace(chunk.Metadata.Source) == "" || strings.TrimSpace(chunk.Metadata.Language) == "" || strings.TrimSpace(chunk.Metadata.Status) == "" || strings.TrimSpace(chunk.Metadata.SectionTitle) == "" {
 		return chunk, fmt.Errorf("metadata source, language, status and section_title must be non-empty strings")
 	}
+	if chunk.Metadata.DocumentURL != nil {
+		documentURL := strings.TrimSpace(*chunk.Metadata.DocumentURL)
+		parsed, err := url.Parse(documentURL)
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return chunk, fmt.Errorf("metadata.document_url must be an absolute HTTP(S) URL")
+		}
+		chunk.Metadata.DocumentURL = &documentURL
+	}
 	if chunk.Metadata.Depth < 0 {
 		return chunk, fmt.Errorf("metadata.depth must be a non-negative integer")
 	}
@@ -476,6 +485,9 @@ func buildPayload(chunk ChunkRecord, inputHash string, pipe PipelineIdentity, st
 		"embedding_backend": EmbeddingBackend, "point_namespace": pipe.PointNamespace,
 		"previous_chunk_id": chunk.PreviousChunkID, "next_chunk_id": chunk.NextChunkID,
 		"duplicate_of_chunk_id": chunk.Metadata.DuplicateOfChunkID,
+	}
+	if chunk.Metadata.DocumentURL != nil {
+		payload["document_url"] = *chunk.Metadata.DocumentURL
 	}
 	if storeText {
 		payload["embedding_text"] = chunk.EmbeddingText

@@ -22,10 +22,10 @@ export class RAGAPIError extends Error {
 export async function requestAnswer(
   query: string,
   options: {
-    collections?: string[]
+    collections: string[]
     signal?: AbortSignal
     fetchImpl?: typeof fetch
-  } = {},
+  },
 ): Promise<AnswerResponse> {
   const fetchImpl = options.fetchImpl ?? fetch
   const response = await fetchImpl("/v1/answer", {
@@ -34,9 +34,7 @@ export async function requestAnswer(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
-      ...(options.collections === undefined
-        ? {}
-        : { collections: options.collections }),
+      collections: options.collections,
     }),
     signal: options.signal,
   })
@@ -96,13 +94,13 @@ export async function requestAnswer(
 export async function requestSearch(
   query: string,
   options: {
-    collections?: string[]
+    collections: string[]
     topK?: number
     scoreThreshold?: number
     filters?: SearchFilters
     signal?: AbortSignal
     fetchImpl?: typeof fetch
-  } = {},
+  },
 ): Promise<SearchResponse> {
   const fetchImpl = options.fetchImpl ?? fetch
   const response = await fetchImpl("/v1/search", {
@@ -111,9 +109,7 @@ export async function requestSearch(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       query,
-      ...(options.collections === undefined
-        ? {}
-        : { collections: options.collections }),
+      collections: options.collections,
       ...(options.topK === undefined ? {} : { top_k: options.topK }),
       ...(options.scoreThreshold === undefined
         ? {}

@@ -88,4 +88,23 @@ describe("AssistantMessage", () => {
     expect(await screen.findAllByText("<img src=x onerror=alert(1)>")).not.toHaveLength(0)
     expect(document.querySelector("img")).toBeNull()
   })
+
+  it("показывает безопасную ссылку на документ Bitrix", async () => {
+    const user = userEvent.setup()
+    const url = "https://hwschool.bitrix24.ru/note/document/3515/"
+    renderMessage(message({ sources: [makeSource({ url })] }))
+    await user.click(screen.getByRole("button", { name: /открыть источник S1/i }))
+    const link = await screen.findByRole("link", { name: /открыть источник в БЗ/i })
+    expect(link).toHaveAttribute("href", url)
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
+  })
+
+  it("не показывает ссылку с небезопасной схемой", async () => {
+    const user = userEvent.setup()
+    renderMessage(message({ sources: [makeSource({ url: "javascript:alert(1)" })] }))
+    await user.click(screen.getByRole("button", { name: /открыть источник S1/i }))
+    await screen.findByRole("dialog")
+    expect(screen.queryByRole("link", { name: /открыть источник в БЗ/i })).not.toBeInTheDocument()
+  })
 })

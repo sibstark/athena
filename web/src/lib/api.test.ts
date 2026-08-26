@@ -15,14 +15,20 @@ describe("requestAnswer", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     )
-    const result = await requestAnswer("Вопрос", { fetchImpl })
+    const result = await requestAnswer("Вопрос", {
+      collections: ["methodology_e5_small_v1"],
+      fetchImpl,
+    })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(fetchImpl).toHaveBeenCalledWith(
       "/v1/answer",
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ query: "Вопрос" }),
+        body: JSON.stringify({
+          query: "Вопрос",
+          collections: ["methodology_e5_small_v1"],
+        }),
       }),
     )
     expect(result.sources[0]).toMatchObject({
@@ -61,7 +67,10 @@ describe("requestAnswer", () => {
         { status: 200 },
       ),
     )
-    const result = await requestSearch("Вопрос", { fetchImpl })
+    const result = await requestSearch("Вопрос", {
+      collections: ["collection"],
+      fetchImpl,
+    })
     expect(fetchImpl).toHaveBeenCalledWith(
       "/v1/search",
       expect.objectContaining({ method: "POST", credentials: "include" }),

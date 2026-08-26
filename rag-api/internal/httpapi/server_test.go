@@ -84,7 +84,7 @@ func TestSearchRequiresAuthAndNeverCallsGenerator(t *testing.T) {
 	if unauthorized.Code != 401 {
 		t.Fatalf("status=%d", unauthorized.Code)
 	}
-	response := perform(handler, "/v1/search", `{"query":"q","filters":{"root_page_id":"3035"}}`, "key")
+	response := perform(handler, "/v1/search", `{"query":"q","collections":["workspace_17"],"filters":{"root_page_id":"3035"}}`, "key")
 	if response.Code != 200 {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -222,7 +222,7 @@ func TestAnswerAcceptsSessionCookieAndRejectsTampering(t *testing.T) {
 	login := loginRequest(server.Handler(), "admin", "password", "192.0.2.13:1234")
 	cookie := login.Result().Cookies()[0]
 
-	authorized := httptest.NewRequest(http.MethodPost, "/v1/answer", strings.NewReader(`{"query":"q"}`))
+	authorized := httptest.NewRequest(http.MethodPost, "/v1/answer", strings.NewReader(`{"query":"q","collections":["methodology_e5_small_v1"]}`))
 	authorized.AddCookie(cookie)
 	authorizedResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(authorizedResponse, authorized)
@@ -294,7 +294,7 @@ func TestLoginRateLimit(t *testing.T) {
 
 func TestAnswerSkipsGeneratorWithoutContext(t *testing.T) {
 	generator := &fakeGenerator{}
-	response := perform(testServer(&fakeRetriever{}, generator).Handler(), "/v1/answer", `{"query":"q"}`, "key")
+	response := perform(testServer(&fakeRetriever{}, generator).Handler(), "/v1/answer", `{"query":"q","collections":["methodology_e5_small_v1"]}`, "key")
 	if response.Code != 200 {
 		t.Fatalf("status=%d", response.Code)
 	}
@@ -308,13 +308,13 @@ func TestAnswerSkipsGeneratorWithoutContext(t *testing.T) {
 
 func TestAnswerReturnsOnlyMentionedQdrantSources(t *testing.T) {
 	generator := &fakeGenerator{results: []models.LLMResult{{Content: "Шаг из первого источника [S1]."}}}
-	response := perform(testServer(&fakeRetriever{results: sampleResults()}, generator).Handler(), "/v1/answer", `{"query":"Как провести урок?"}`, "key")
+	response := perform(testServer(&fakeRetriever{results: sampleResults()}, generator).Handler(), "/v1/answer", `{"query":"Как провести урок?","collections":["methodology_e5_small_v1"]}`, "key")
 	if response.Code != 200 {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	var result models.AnswerResponse
 	json.NewDecoder(response.Body).Decode(&result)
-	if len(result.Sources) != 1 || result.Sources[0].ChunkID != "chunk_1" || result.Sources[0].Collection != "methodology_e5_small_v1" {
+	if len(result.Sources) != 1 || result.Sources[0].ChunkID != "chunk_1" || result.Sources[0].Collection != "methodology_e5_small_v1" || result.Sources[0].URL != "https://hwschool.bitrix24.ru/note/document/1/" {
 		t.Fatalf("sources=%+v", result.Sources)
 	}
 	if strings.Contains(generator.prompts[0], "Второй") == false {
@@ -340,9 +340,47 @@ func TestAnswerRejectsEmptyCollectionName(t *testing.T) {
 	}
 }
 
+func TestSearchAndAnswerRequireNonEmptyCollections(t *testing.T) {
+	for _, path := range []string{"/v1/search", "/v1/answer"} {
+		for _, body := range []string{
+			`{"query":"q"}`,
+			`{"query":"q","collections":null}`,
+			`{"query":"q","collections":[]}`,
+		} {
+			retriever := &fakeRetriever{}
+			generator := &fakeGenerator{}
+			response := perform(testServer(retriever, generator).Handler(), path, body, "key")
+			if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_request"`) || !strings.Contains(response.Body.String(), "collections") {
+				t.Fatalf("path=%s body=%s status=%d response=%s", path, body, response.Code, response.Body.String())
+			}
+			if retriever.calls.Load() != 0 || generator.calls.Load() != 0 {
+				t.Fatalf("path=%s body=%s retriever=%d generator=%d", path, body, retriever.calls.Load(), generator.calls.Load())
+			}
+		}
+	}
+}
+
+func TestSearchDeduplicatesCollectionsAndReportsEffectiveList(t *testing.T) {
+	retriever := &fakeRetriever{}
+	response := perform(testServer(retriever, &fakeGenerator{}).Handler(), "/v1/search", `{"query":"q","collections":["workspace_17"," workspace_17 ","workspace_25"]}`, "key")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(retriever.options) != 1 || len(retriever.options[0].Collections) != 2 || retriever.options[0].Collections[0] != "workspace_17" || retriever.options[0].Collections[1] != "workspace_25" {
+		t.Fatalf("options=%+v", retriever.options)
+	}
+	var result models.SearchResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Retrieval.Collections) != 2 || result.Retrieval.Collections[0] != "workspace_17" || result.Retrieval.Collections[1] != "workspace_25" {
+		t.Fatalf("retrieval=%+v", result.Retrieval)
+	}
+}
+
 func TestAnswerRepairsInvalidCitationOnce(t *testing.T) {
 	generator := &fakeGenerator{results: []models.LLMResult{{Content: "Ответ [S99]."}, {Content: "Исправленный ответ [S2]."}}}
-	response := perform(testServer(&fakeRetriever{results: sampleResults()}, generator).Handler(), "/v1/answer", `{"query":"q"}`, "key")
+	response := perform(testServer(&fakeRetriever{results: sampleResults()}, generator).Handler(), "/v1/answer", `{"query":"q","collections":["methodology_e5_small_v1"]}`, "key")
 	if response.Code != 200 || generator.calls.Load() != 2 {
 		t.Fatalf("status=%d calls=%d body=%s", response.Code, generator.calls.Load(), response.Body.String())
 	}
@@ -353,7 +391,7 @@ func TestAnswerRepairsInvalidCitationOnce(t *testing.T) {
 
 func TestAnswerFailsAfterOneBadRepair(t *testing.T) {
 	generator := &fakeGenerator{results: []models.LLMResult{{Content: "Без цитат"}, {Content: "Снова [S42]"}}}
-	response := perform(testServer(&fakeRetriever{results: sampleResults()}, generator).Handler(), "/v1/answer", `{"query":"q"}`, "key")
+	response := perform(testServer(&fakeRetriever{results: sampleResults()}, generator).Handler(), "/v1/answer", `{"query":"q","collections":["methodology_e5_small_v1"]}`, "key")
 	if response.Code != 502 || !strings.Contains(response.Body.String(), "generation_validation_failed") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -370,7 +408,7 @@ func TestClientCancellationReachesRetriever(t *testing.T) {
 	retriever := &fakeRetriever{wait: true}
 	handler := testServer(retriever, &fakeGenerator{}).Handler()
 	ctx, cancel := context.WithCancel(context.Background())
-	request := httptest.NewRequest(http.MethodPost, "/v1/search", bytes.NewBufferString(`{"query":"q"}`)).WithContext(ctx)
+	request := httptest.NewRequest(http.MethodPost, "/v1/search", bytes.NewBufferString(`{"query":"q","collections":["methodology_e5_small_v1"]}`)).WithContext(ctx)
 	request.Header.Set("Authorization", "Bearer key")
 	response := httptest.NewRecorder()
 	done := make(chan struct{})
@@ -410,5 +448,5 @@ func perform(handler http.Handler, path, body, key string) *httptest.ResponseRec
 	return response
 }
 func sampleResults() []models.SearchResult {
-	return []models.SearchResult{{SourceID: "S1", Collection: "methodology_e5_small_v1", ChunkID: "chunk_1", DocumentID: "page_1", Score: .9, Content: "Первый", Title: "Документ 1", Breadcrumbs: []string{"Root"}}, {SourceID: "S2", Collection: "accounting_e5_small_v1", ChunkID: "chunk_2", DocumentID: "page_2", Score: .8, Content: "Второй", Title: "Документ 2", Breadcrumbs: []string{"Root"}}}
+	return []models.SearchResult{{SourceID: "S1", Collection: "methodology_e5_small_v1", ChunkID: "chunk_1", DocumentID: "page_1", Score: .9, Content: "Первый", Title: "Документ 1", URL: "https://hwschool.bitrix24.ru/note/document/1/", Breadcrumbs: []string{"Root"}}, {SourceID: "S2", Collection: "accounting_e5_small_v1", ChunkID: "chunk_2", DocumentID: "page_2", Score: .8, Content: "Второй", Title: "Документ 2", Breadcrumbs: []string{"Root"}}}
 }

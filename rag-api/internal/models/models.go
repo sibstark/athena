@@ -34,7 +34,7 @@ type Filters struct {
 
 type SearchRequest struct {
 	Query          string   `json:"query"`
-	Collections    []string `json:"collections,omitempty"`
+	Collections    []string `json:"collections"`
 	TopK           *int     `json:"top_k,omitempty"`
 	ScoreThreshold *float64 `json:"score_threshold,omitempty"`
 	Filters        Filters  `json:"filters,omitempty"`
@@ -58,6 +58,7 @@ type SearchResult struct {
 	ContentHash     string         `json:"-"`
 	Title           string         `json:"title"`
 	Source          string         `json:"source"`
+	URL             string         `json:"url,omitempty"`
 	Breadcrumbs     []string       `json:"breadcrumbs"`
 	HeadingPath     []string       `json:"heading_path"`
 	SectionTitle    string         `json:"section_title"`
@@ -93,6 +94,7 @@ type AnswerSource struct {
 	Score        float64  `json:"score"`
 	Title        string   `json:"title"`
 	Source       string   `json:"source"`
+	URL          string   `json:"url,omitempty"`
 	Breadcrumbs  []string `json:"breadcrumbs"`
 	HeadingPath  []string `json:"heading_path"`
 	SectionTitle string   `json:"section_title"`
@@ -134,7 +136,7 @@ type APIErrorBody struct {
 func (result SearchResult) SourceMetadata() AnswerSource {
 	return AnswerSource{
 		SourceID: result.SourceID, Collection: result.Collection, ChunkID: result.ChunkID, DocumentID: result.DocumentID,
-		Score: result.Score, Title: result.Title, Source: result.Source,
+		Score: result.Score, Title: result.Title, Source: result.Source, URL: result.URL,
 		Breadcrumbs: result.Breadcrumbs, HeadingPath: result.HeadingPath, SectionTitle: result.SectionTitle,
 	}
 }

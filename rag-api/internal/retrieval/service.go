@@ -93,7 +93,7 @@ func resultFromHit(hit qdrant.Hit) (models.SearchResult, bool) {
 	}
 	return models.SearchResult{
 		Collection: hit.Collection, ChunkID: chunkID, DocumentID: documentID, Score: hit.Score, Content: content,
-		ContentHash: stringValue(p, "content_hash"), Title: stringValue(p, "title"), Source: stringValue(p, "source"),
+		ContentHash: stringValue(p, "content_hash"), Title: stringValue(p, "title"), Source: stringValue(p, "source"), URL: stringValue(p, "document_url"),
 		Breadcrumbs: stringSlice(p["breadcrumbs"]), HeadingPath: stringSlice(p["heading_path"]), SectionTitle: stringValue(p, "section_title"),
 		PreviousChunkID: stringValue(p, "previous_chunk_id"), NextChunkID: stringValue(p, "next_chunk_id"), Metadata: p,
 	}, true

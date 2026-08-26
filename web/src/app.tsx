@@ -17,6 +17,8 @@ import { requestLogout, requestSession } from "@/lib/auth"
 import { requestAnswer, RAGAPIError } from "@/lib/api"
 import type { ChatMessage } from "@/types/api"
 
+const CHAT_COLLECTIONS = ["methodology_e5_small_v1"]
+
 export function App() {
   const [session, setSession] = React.useState<
     | { status: "checking" }
@@ -97,6 +99,7 @@ export function App() {
 
       try {
         const response = await requestAnswer(trimmed, {
+          collections: CHAT_COLLECTIONS,
           signal: controller.signal,
         })
         setMessages((current) => [

@@ -66,6 +66,19 @@ func TestSearchPassesRequestedCollectionsWithOneEmbedding(t *testing.T) {
 		t.Fatalf("collections=%v", searcher.params.Collections)
 	}
 }
+
+func TestSearchMapsDocumentURLFromQdrantPayload(t *testing.T) {
+	searcher := &fakeSearcher{hits: []qdrant.Hit{{Score: .9, Payload: payload("a", "hash", "Текст")}}}
+	service := New(&fakeEmbedder{}, searcher, 20)
+	results, _, err := service.Search(t.Context(), models.SearchOptions{Query: "q", TopK: 1, ScoreThreshold: .65})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].URL != "https://hwschool.bitrix24.ru/note/document/1/" {
+		t.Fatalf("results=%+v", results)
+	}
+}
+
 func payload(id, hash, content string) map[string]any {
-	return map[string]any{"chunk_id": id, "document_id": "page_1", "content": content, "content_hash": hash, "breadcrumbs": []any{"Root"}, "heading_path": []any{}}
+	return map[string]any{"chunk_id": id, "document_id": "page_1", "content": content, "content_hash": hash, "document_url": "https://hwschool.bitrix24.ru/note/document/1/", "breadcrumbs": []any{"Root"}, "heading_path": []any{}}
 }

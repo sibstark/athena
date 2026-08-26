@@ -9,6 +9,7 @@ export interface NormalizedAsset {
 export interface NormalizedMetadata {
   title: string | null;
   source: string;
+  document_url: string;
   page_id: string | null;
   parent_page_id: string | null;
   root_page_id: string | null;

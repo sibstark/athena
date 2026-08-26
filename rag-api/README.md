@@ -59,7 +59,7 @@ openssl rand -base64 32
 | `AUTH_COOKIE_SECURE` | `false` локально; `true` только с HTTPS |
 | `TEI_URL` | `http://127.0.0.1:8080` на host |
 | `QDRANT_URL` | `http://127.0.0.1:6333` на host |
-| `QDRANT_COLLECTION` | `methodology_e5_small_v1` |
+| `QDRANT_COLLECTION` | `methodology_e5_small_v1`; эталонная коллекция для readiness-проверки, не fallback поисковых запросов |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` |
 | `DEEPSEEK_THINKING_ENABLED` | `false` |
@@ -162,6 +162,8 @@ curl -sS http://127.0.0.1:8090/v1/search \
 
 Поддерживаются только реальные плоские payload-поля Qdrant: `document_id`, `parent_document_id`, `page_id`, `parent_page_id`, `root_page_id`, `language`, `category`, `status`. Вложенные `metadata.*` не принимаются. Поле `collections` выбирает коллекции Qdrant; оно не является ACL и не содержит контекста пользователя.
 
+`collections` обязательно для `/v1/search` и `/v1/answer` и должно содержать хотя бы одно непустое имя. Если поле отсутствует, равно `null` или передано как `[]`, API возвращает `400 invalid_request` и не вызывает TEI, Qdrant или DeepSeek. Получить доступные имена можно через `GET /v1/collections`.
+
 ## Ответ с источниками
 
 ```bash
@@ -171,7 +173,7 @@ curl -sS http://127.0.0.1:8090/v1/answer \
   -d '{"query":"Как провести урок по цифре 5?","collections":["methodology_e5_small_v1"],"top_k":8}'
 ```
 
-`/v1/answer` отправляет во внешний DeepSeek API вопрос и только выбранные после threshold/deduplication чанки. Если контекста нет, DeepSeek не вызывается. Цитаты проверяются; metadata источников всегда берётся из Qdrant, а не из текста модели.
+`/v1/answer` отправляет во внешний DeepSeek API вопрос и только выбранные после threshold/deduplication чанки. Если контекста нет, DeepSeek не вызывается. Цитаты проверяются; metadata источников всегда берётся из Qdrant, а не из текста модели. Если payload содержит `document_url`, `/v1/search` и `/v1/answer` возвращают его как поле `url` соответствующего источника.
 
 ### Поиск по нескольким коллекциям
 
@@ -187,7 +189,7 @@ curl -sS http://127.0.0.1:8090/v1/answer \
 }
 ```
 
-TEI вызывается один раз. Затем API параллельно выполняет поиск в каждой переданной коллекции, объединяет результаты, удаляет дубли и формирует общий контекст. Пустой список использует существующую `QDRANT_COLLECTION` для обратной совместимости; новые машинные клиенты должны передавать коллекции явно.
+TEI вызывается один раз. Затем API параллельно выполняет поиск в каждой переданной коллекции, объединяет результаты, удаляет дубли и формирует общий контекст. API не выбирает коллекции автоматически: вызывающий клиент обязан явно передать весь список для конкретного запроса.
 
 ## Тесты и сборка
 

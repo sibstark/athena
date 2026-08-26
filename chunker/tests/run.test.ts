@@ -179,6 +179,7 @@ function document(id: string, content: string) {
     content,
     metadata: {
       title: "Документ", source: `documents/${id}.md`, page_id: id.replace("page_", ""),
+      document_url: `https://hwschool.bitrix24.ru/note/document/${id.replace("page_", "")}/`,
       parent_page_id: null, root_page_id: id.replace("page_", ""), depth: 0,
       ancestor_ids: [], breadcrumbs: ["Документ"], context_text: "Документ",
       document_type: "markdown", indexable: true, external_urls: [], assets: [],

@@ -58,7 +58,7 @@ export function SourceDetails({ source }: { source: Source }) {
       {externalURL && (
         <Button asChild variant="outline" size="sm">
           <a href={externalURL} target="_blank" rel="noopener noreferrer">
-            Открыть внешний источник <ExternalLink data-icon="inline-end" />
+            Открыть источник в БЗ <ExternalLink data-icon="inline-end" />
           </a>
         </Button>
       )}

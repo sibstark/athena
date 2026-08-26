@@ -67,6 +67,32 @@ describe("Markdown chunker", () => {
     expect(preamble?.content).toBe("Важное введение.");
   });
 
+  it("preserves the Bitrix document URL in every chunk", async () => {
+    const documentURL = "https://hwschool.bitrix24.ru/note/document/3515/";
+    const result = await run([
+      document("## Первый\n\nТекст.\n\n## Второй\n\nЕщё текст.", {
+        metadata: { document_url: documentURL },
+      }),
+    ]);
+
+    expect(result.chunks.length).toBeGreaterThan(1);
+    expect(result.chunks.every((chunk) => chunk.metadata.document_url === documentURL)).toBe(true);
+  });
+
+  it("reports an invalid document URL without blocking valid documents", async () => {
+    const broken = document("## Ошибка\n\nТекст.", {
+      document_id: "page_1",
+      metadata: { document_url: "javascript:alert(1)" },
+    });
+    const valid = document("## Рабочий\n\nТекст.", { document_id: "page_2" });
+    const result = await run([broken, valid]);
+
+    expect(result.chunks).toHaveLength(1);
+    expect(result.chunks[0]?.document_id).toBe("page_2");
+    expect(result.report).toMatchObject({ input_documents: 2, processed_documents: 1, errors: 1 });
+    expect(result.report.error_documents[0]?.message).toContain("metadata.document_url");
+  });
+
   it("keeps a small semantic section below the soft minimum", async () => {
     const result = await run([document("## Коротко\n\nДа.")], {
       minTokens: 100,
@@ -447,6 +473,7 @@ function document(
     metadata: {
       title: "Тестовый документ",
       source: `documents/${id}.md`,
+      document_url: `https://hwschool.bitrix24.ru/note/document/${id.replace(/^page_/u, "")}/`,
       page_id: id.replace(/^page_/u, ""),
       parent_page_id: null,
       root_page_id: id.replace(/^page_/u, ""),

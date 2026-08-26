@@ -153,7 +153,7 @@ go run ./cmd/fetcher index \
 
 Перед любой записью indexer проверяет `/health` и `/info` внешнего TEI, точные model ID/revision и запрет truncation. Qdrant и TEI команда не запускает. Настройки читаются из `TEI_URL`, `TEI_TIMEOUT`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_TIMEOUT`, `QDRANT_COLLECTION`, `INDEXER_BATCH_SIZE`, `EMBEDDING_PIPELINE_VERSION`, `EMBEDDING_VECTOR_CACHE_SIZE`, `STORE_EMBEDDING_TEXT` и `LOG_LEVEL`.
 
-Payload новых точек содержит `embedding_backend: "tei"`. Существующие точки Transformers.js без этого поля автоматически вычисляются заново; их vectors не используются как кеш. UUID точек и остальные параметры embedding pipeline остаются совместимыми.
+Payload новых точек содержит `embedding_backend: "tei"` и, если он присутствует в chunk metadata, точный `document_url` исходного документа Bitrix. Добавление или изменение `document_url` выполняется как payload-only update без повторного вычисления embedding. Существующие точки Transformers.js без `embedding_backend` автоматически вычисляются заново; их vectors не используются как кеш. UUID точек и остальные параметры embedding pipeline остаются совместимыми.
 
 Полезные режимы: `--dry-run`, `--force-reembed`, `--continue-on-error`; `--prune` применяется вручную только с `--input`, а с `--run` всегда включён безопасно.
 

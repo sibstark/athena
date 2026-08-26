@@ -67,6 +67,7 @@ type RunConfig struct {
 type ChunkMetadata struct {
 	Title              *string  `json:"title"`
 	Source             string   `json:"source"`
+	DocumentURL        *string  `json:"document_url,omitempty"`
 	PageID             *string  `json:"page_id"`
 	ParentPageID       *string  `json:"parent_page_id"`
 	RootPageID         *string  `json:"root_page_id"`

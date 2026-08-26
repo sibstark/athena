@@ -28,7 +28,6 @@ import (
 
 type Retriever interface {
 	Search(context.Context, models.SearchOptions) ([]models.SearchResult, time.Duration, error)
-	Collection() string
 }
 type Generator interface {
 	Generate(context.Context, string, string) (models.LLMResult, error)
@@ -185,7 +184,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.Found(len(results))
-	writeJSON(w, http.StatusOK, models.SearchResponse{RequestID: requestID(r.Context()), Query: options.Query, Results: results, Retrieval: models.RetrievalInfo{Collections: effectiveCollections(options.Collections, s.retriever.Collection()), EmbeddingModel: models.EmbeddingModel, Returned: len(results), DurationMS: duration.Milliseconds()}})
+	writeJSON(w, http.StatusOK, models.SearchResponse{RequestID: requestID(r.Context()), Query: options.Query, Results: results, Retrieval: models.RetrievalInfo{Collections: append([]string(nil), options.Collections...), EmbeddingModel: models.EmbeddingModel, Returned: len(results), DurationMS: duration.Milliseconds()}})
 }
 
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {
@@ -289,6 +288,10 @@ func (s *Server) decodeSearchRequest(w http.ResponseWriter, r *http.Request) (mo
 		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "score_threshold должен быть от -1 до 1")
 		return models.SearchOptions{}, false
 	}
+	if len(request.Collections) == 0 {
+		s.writeError(w, r, http.StatusBadRequest, "invalid_request", "Поле collections обязательно и должно содержать хотя бы одну коллекцию")
+		return models.SearchOptions{}, false
+	}
 	collections := make([]string, 0, len(request.Collections))
 	seenCollections := make(map[string]struct{}, len(request.Collections))
 	for _, collection := range request.Collections {
@@ -304,16 +307,6 @@ func (s *Server) decodeSearchRequest(w http.ResponseWriter, r *http.Request) (mo
 		collections = append(collections, collection)
 	}
 	return models.SearchOptions{Query: query, Collections: collections, TopK: topK, ScoreThreshold: threshold, Filters: request.Filters}, true
-}
-
-func effectiveCollections(requested []string, fallback string) []string {
-	if len(requested) > 0 {
-		return append([]string(nil), requested...)
-	}
-	if fallback == "" {
-		return []string{}
-	}
-	return []string{fallback}
 }
 
 func (s *Server) downstreamError(w http.ResponseWriter, r *http.Request, err error) {
