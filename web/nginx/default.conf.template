@@ -19,7 +19,7 @@ server {
     }
 
     location /v1/ {
-        proxy_pass ${RAG_API_UPSTREAM};
+        proxy_pass ${API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $athena_client_ip;

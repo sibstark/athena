@@ -58,13 +58,13 @@ services:
       retries: 60
       start_period: 30s
 
-  rag-api:
+  api:
     build:
-      context: ./rag-api
+      context: ./api
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${RAG_API_PORT:-8090}:8080"
+      - "127.0.0.1:${API_PORT:-8090}:8080"
     environment:
       HTTP_ADDR: :8080
       TEI_URL: http://embeddings:80
@@ -95,7 +95,7 @@ services:
       DEEPSEEK_MAX_OUTPUT_TOKENS: ${DEEPSEEK_MAX_OUTPUT_TOKENS:-1200}
       DEEPSEEK_THINKING_ENABLED: ${DEEPSEEK_THINKING_ENABLED:-false}
       DEEPSEEK_MAX_CONCURRENCY: ${DEEPSEEK_MAX_CONCURRENCY:-4}
-      RAG_API_KEY: ${RAG_API_KEY:-}
+      API_KEY: ${API_KEY:-}
       AUTH_USERNAME: ${AUTH_USERNAME:-}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
       AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-}
@@ -116,7 +116,7 @@ services:
       embeddings:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/rag-api", "healthcheck"]
+      test: ["CMD", "/api", "healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -135,13 +135,13 @@ services:
       REST_WEBHOOK_URL: ${BITRIX_REST_WEBHOOK_URL:-}
       BOT_ID: ${BITRIX_BOT_ID:-}
       BOT_TOKEN: ${BITRIX_BOT_TOKEN:-}
-      API_URL: ${RAG_API_URL:-http://rag-api:8080}
-      API_KEY: ${RAG_API_KEY:-}
+      API_URL: ${API_URL:-http://api:8080}
+      API_KEY: ${API_KEY:-}
       REQUEST_TIMEOUT_MS: ${BOT_REQUEST_TIMEOUT_MS:-75000}
     volumes:
       - bot_logs:/app/logs
     depends_on:
-      rag-api:
+      api:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:$${PORT}/health/live >/dev/null || exit 1"]
@@ -158,10 +158,10 @@ services:
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:8080"
     environment:
-      RAG_API_UPSTREAM: http://rag-api:8080
-      NGINX_ENVSUBST_FILTER: ^RAG_API_UPSTREAM$$
+      API_UPSTREAM: http://api:8080
+      NGINX_ENVSUBST_FILTER: ^API_UPSTREAM$$
     depends_on:
-      rag-api:
+      api:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz >/dev/null || exit 1"]

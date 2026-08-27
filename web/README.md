@@ -1,6 +1,6 @@
 # Athena Web
 
-React/Vite-клиент для `rag-api`. Интерфейс отправляет same-origin запросы с `credentials: "include"` и использует только `HttpOnly` session cookie. `RAG_API_KEY` предназначен для внутренних клиентов и браузерному proxy не передаётся.
+React/Vite-клиент для `api`. Интерфейс отправляет same-origin запросы с `credentials: "include"` и использует только `HttpOnly` session cookie. `API_KEY` предназначен для внутренних клиентов и браузерному proxy не передаётся.
 
 ## Технологии
 
@@ -16,7 +16,7 @@ Tailwind подключён через `@import "tailwindcss"`; `tailwind.config
 Из корня репозитория настройте `.env`:
 
 ```env
-RAG_API_DEV_TARGET=http://127.0.0.1:8090
+API_DEV_TARGET=http://127.0.0.1:8090
 AUTH_USERNAME=admin
 AUTH_PASSWORD_HASH='<bcrypt-хеш>'
 AUTH_SESSION_SECRET=<случайный секрет минимум 32 байта>
@@ -50,9 +50,9 @@ bun run web:status
 bun run web:logs
 ```
 
-Приложение доступно на `http://127.0.0.1:${WEB_PORT:-3000}`. nginx проксирует `/v1/*` и cookie в `rag-api`, одновременно удаляя браузерный заголовок `Authorization`.
+Приложение доступно на `http://127.0.0.1:${WEB_PORT:-3000}`. nginx проксирует `/v1/*` и cookie в `api`, одновременно удаляя браузерный заголовок `Authorization`.
 
-При публикации используйте HTTPS и `AUTH_COOKIE_SECURE=true`. Корневой Compose содержит opt-in профиль `https` на базе `umputun/nginx-le:v1.4.3`; настройка домена и команды запуска описаны в корневом README. Не публикуйте напрямую порты TEI, Qdrant или `rag-api`.
+При публикации используйте HTTPS и `AUTH_COOKIE_SECURE=true`. Корневой Compose содержит opt-in профиль `https` на базе `umputun/nginx-le:v1.4.3`; настройка домена и команды запуска описаны в корневом README. Не публикуйте напрямую порты TEI, Qdrant или `api`.
 
 ## Источники
 

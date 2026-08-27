@@ -6,9 +6,9 @@
 fetcher/     Все БЗ Bitrix24 → immutable runs; Go normalizer и indexer
 chunker/     Все normalized workspace → отдельный chunks run
 tei/         Bun-клиенты → Rust TEI → read-only Qdrant compatibility/search
-rag-api/     Go HTTP API → TEI + read-only Qdrant + DeepSeek
-web/         React chat UI → same-origin nginx proxy → rag-api
-bot/         Go webhook adapter → rag-api → Bitrix dialog
+api/     Go HTTP API → TEI + read-only Qdrant + DeepSeek
+web/         React chat UI → same-origin nginx proxy → api
+bot/         Go webhook adapter → api → Bitrix dialog
 data/        общие входные и выходные данные (не в Git)
 var/models/  общий кеш моделей (не в Git)
 var/qdrant/  данные Qdrant (не в Git)
@@ -48,22 +48,22 @@ bun run tei:down
 
 Подробности, smoke search и compatibility test: [tei/README.md](tei/README.md).
 
-## Go RAG API
+## Go API
 
-`rag-api/` — отдельный production HTTP-сервис. Он использует прошедший compatibility test TEI для query embeddings, читает существующую коллекцию Qdrant и вызывает DeepSeek только для `/v1/answer` при наличии релевантного контекста.
+`api/` — отдельный production HTTP-сервис. Он использует прошедший compatibility test TEI для query embeddings, читает существующую коллекцию Qdrant и вызывает DeepSeek только для `/v1/answer` при наличии релевантного контекста.
 
 ```bash
-bun run rag-api:test
-bun run rag-api:up
-bun run rag-api:status
-bun run rag-api:logs
+bun run api:test
+bun run api:up
+bun run api:status
+bun run api:logs
 ```
 
-Настройка, endpoint-ы и проверенные curl-примеры: [rag-api/README.md](rag-api/README.md).
+Настройка, endpoint-ы и проверенные curl-примеры: [api/README.md](api/README.md).
 
 ## Web-интерфейс
 
-`web/` — отдельный Bun/Vite-проект на React, Tailwind CSS v4 и shadcn/ui. Он показывает интерактивные цитаты, tooltip пути, подробную панель источника и компактные сноски. Браузер авторизуется через подписанную `HttpOnly` cookie; `RAG_API_KEY` используется только внутренними CLI и машинными клиентами.
+`web/` — отдельный Bun/Vite-проект на React, Tailwind CSS v4 и shadcn/ui. Он показывает интерактивные цитаты, tooltip пути, подробную панель источника и компактные сноски. Браузер авторизуется через подписанную `HttpOnly` cookie; `API_KEY` используется только внутренними CLI и машинными клиентами.
 
 ```bash
 bun run web:test
@@ -72,7 +72,7 @@ bun run web:up
 bun run web:status
 ```
 
-После запуска Compose интерфейс доступен на `http://127.0.0.1:${WEB_PORT:-3000}`. Для production требуется внешний аутентифицирующий reverse proxy с TLS; встроенный web nginx отвечает только за статику и связь с `rag-api`. Подробности: [web/README.md](web/README.md).
+После запуска Compose интерфейс доступен на `http://127.0.0.1:${WEB_PORT:-3000}`. Для production требуется внешний аутентифицирующий reverse proxy с TLS; встроенный web nginx отвечает только за статику и связь с `api`. Подробности: [web/README.md](web/README.md).
 
 ## Bitrix24 bot
 
@@ -101,7 +101,7 @@ bun run https:logs
 curl -I https://devgames.hwschool.online/healthz
 ```
 
-HTTP автоматически перенаправляется на HTTPS. Порты Qdrant, TEI и `rag-api` остаются привязаны только к `127.0.0.1`; не открывайте их в firewall. Для остановки только TLS-прокси используйте `bun run https:down`. Не удаляйте `var/nginx-le/ssl/`, если хотите сохранить выданные сертификаты.
+HTTP автоматически перенаправляется на HTTPS. Порты Qdrant, TEI и `api` остаются привязаны только к `127.0.0.1`; не открывайте их в firewall. Для остановки только TLS-прокси используйте `bun run https:down`. Не удаляйте `var/nginx-le/ssl/`, если хотите сохранить выданные сертификаты.
 
 ## Выгрузка Bitrix24
 

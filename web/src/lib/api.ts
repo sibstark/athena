@@ -7,13 +7,13 @@ import type {
   Source,
 } from "@/types/api"
 
-export class RAGAPIError extends Error {
+export class APIError extends Error {
   readonly code: string
   readonly status: number
 
   constructor(message: string, code = "request_failed", status = 0) {
     super(message)
-    this.name = "RAGAPIError"
+    this.name = "APIError"
     this.code = code
     this.status = status
   }
@@ -44,7 +44,7 @@ export async function requestAnswer(
     const error = isRecord(payload)
       ? (payload as APIErrorResponse).error
       : undefined
-    throw new RAGAPIError(
+    throw new APIError(
       error?.message || "Не удалось получить ответ. Попробуйте ещё раз.",
       error?.code,
       response.status,
@@ -52,7 +52,7 @@ export async function requestAnswer(
   }
 
   if (!isRecord(payload) || typeof payload.answer !== "string") {
-    throw new RAGAPIError(
+    throw new APIError(
       "Сервер вернул некорректный ответ.",
       "invalid_response",
       response.status,
@@ -61,7 +61,7 @@ export async function requestAnswer(
 
   const status = payload.status
   if (status !== "ok" && status !== "insufficient_context") {
-    throw new RAGAPIError(
+    throw new APIError(
       "Сервер вернул неизвестный статус.",
       "invalid_response",
       response.status,
@@ -123,14 +123,14 @@ export async function requestSearch(
     const error = isRecord(payload)
       ? (payload as APIErrorResponse).error
       : undefined
-    throw new RAGAPIError(
+    throw new APIError(
       error?.message || "Не удалось выполнить поиск. Попробуйте ещё раз.",
       error?.code,
       response.status,
     )
   }
   if (!isRecord(payload) || !Array.isArray(payload.results)) {
-    throw new RAGAPIError(
+    throw new APIError(
       "Сервер вернул некорректный результат поиска.",
       "invalid_response",
       response.status,

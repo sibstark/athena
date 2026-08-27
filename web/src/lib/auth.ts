@@ -1,4 +1,4 @@
-import { RAGAPIError } from "@/lib/api"
+import { APIError } from "@/lib/api"
 import type { APIErrorResponse } from "@/types/api"
 
 export type AuthSession =
@@ -61,7 +61,7 @@ function authenticatedSession(
     typeof payload.username !== "string" ||
     !payload.username
   ) {
-    throw new RAGAPIError(
+    throw new APIError(
       "Сервер вернул некорректную сессию.",
       "invalid_response",
       response.status,
@@ -74,11 +74,11 @@ function apiError(
   response: Response,
   payload: unknown,
   fallback: string,
-): RAGAPIError {
+): APIError {
   const error = isRecord(payload)
     ? (payload as APIErrorResponse).error
     : undefined
-  return new RAGAPIError(
+  return new APIError(
     error?.message || fallback,
     error?.code,
     response.status,

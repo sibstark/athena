@@ -14,7 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { requestLogout, requestSession } from "@/lib/auth"
-import { requestAnswer, RAGAPIError } from "@/lib/api"
+import { requestAnswer, APIError } from "@/lib/api"
 import type { ChatMessage } from "@/types/api"
 
 const CHAT_COLLECTIONS = ["methodology_e5_small_v1"]
@@ -116,12 +116,12 @@ export function App() {
         ])
       } catch (reason) {
         if (controller.signal.aborted) return
-        if (reason instanceof RAGAPIError && reason.status === 401) {
+        if (reason instanceof APIError && reason.status === 401) {
           endSession()
           return
         }
         setError(
-          reason instanceof RAGAPIError
+          reason instanceof APIError
             ? reason.message
             : "Не удалось связаться с сервисом. Попробуйте ещё раз.",
         )

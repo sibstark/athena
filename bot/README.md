@@ -6,7 +6,7 @@ Go-адаптер для Bitrix24 Chat Bots 2.0 без собственной б
 Bitrix message → POST /v1/answer → Bitrix reply in the same dialog
 ```
 
-Перед каждым вопросом бот получает актуальный список через `GET /v1/collections`, затем отправляет в RAG API текущее сообщение и все найденные коллекции:
+Перед каждым вопросом бот получает актуальный список через `GET /v1/collections`, затем отправляет в API текущее сообщение и все найденные коллекции:
 
 ```json
 {
@@ -15,7 +15,7 @@ Bitrix message → POST /v1/answer → Bitrix reply in the same dialog
 }
 ```
 
-Идентификаторы пользователей, роли, отделы и другой контекст Bitrix в RAG API не передаются.
+Идентификаторы пользователей, роли, отделы и другой контекст Bitrix в API не передаются.
 
 ## Настройка Compose
 
@@ -28,8 +28,8 @@ BITRIX_APPLICATION_TOKEN=the-application-token-from-webhook-event
 BITRIX_REST_WEBHOOK_URL=https://portal.bitrix24.ru/rest/1/webhook-code/
 BITRIX_BOT_ID=456
 BITRIX_BOT_TOKEN=the-bot-token-used-at-registration
-RAG_API_URL=http://rag-api:8080
-RAG_API_KEY=internal-rag-token
+API_URL=http://api:8080
+API_KEY=internal-rag-token
 BOT_REQUEST_TIMEOUT_MS=75000
 ```
 
@@ -99,7 +99,7 @@ https://devgames.hwschool.online/bitrix/bot/webhook
   → http://bot:8080/webhook
 ```
 
-После проверки payload и токена бот сразу отвечает Bitrix HTTP 200, а запрос к RAG API и отправку сообщения выполняет асинхронно. При ошибке RAG API бот пытается отправить стандартное сообщение-заглушку. Хранилища дедупликации в сервисе нет.
+После проверки payload и токена бот сразу отвечает Bitrix HTTP 200, а запрос к API и отправку сообщения выполняет асинхронно. При ошибке API бот пытается отправить стандартное сообщение-заглушку. Хранилища дедупликации в сервисе нет.
 
 ## Ссылки
 

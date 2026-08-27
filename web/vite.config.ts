@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         "/v1": {
-          target: env.RAG_API_DEV_TARGET || "http://127.0.0.1:8090",
+          target: env.API_DEV_TARGET || "http://127.0.0.1:8090",
           changeOrigin: true,
         },
       },

@@ -59,6 +59,6 @@ bun run rag:compat:tei -- \
 
 ## Почему одна модель обязательна
 
-Документные и query embeddings должны находиться в одном векторном пространстве. Chunker, Go-indexer в `fetcher`, TEI и Go RAG API используют один model ID, revision, pooling, normalization и E5-префиксы. Для другой модели создаётся новая коллекция после отдельного решения.
+Документные и query embeddings должны находиться в одном векторном пространстве. Chunker, Go-indexer в `fetcher`, TEI и Go API используют один model ID, revision, pooling, normalization и E5-префиксы. Для другой модели создаётся новая коллекция после отдельного решения.
 
-Go RAG API вызывает `POST /embed` TEI с `query: <вопрос>`, проверяет 384 координаты и выполняет поиск в Qdrant; Go-indexer использует тот же endpoint с `passage: <документ>`.
+Go API вызывает `POST /embed` TEI с `query: <вопрос>`, проверяет 384 координаты и выполняет поиск в Qdrant; Go-indexer использует тот же endpoint с `passage: <документ>`.

@@ -8,7 +8,7 @@ reports/
 **/node_modules/
 **/dist/
 **/coverage/
-rag-api/server
-rag-api/coverage.out
+api/server
+api/coverage.out
 .vscode/
 bot.json

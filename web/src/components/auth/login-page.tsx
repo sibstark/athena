@@ -4,7 +4,7 @@ import { BookOpen, LoaderCircle, LogIn } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { requestLogin } from "@/lib/auth"
-import { RAGAPIError } from "@/lib/api"
+import { APIError } from "@/lib/api"
 
 type LoginPageProps = {
   initialError?: string
@@ -28,7 +28,7 @@ export function LoginPage({ initialError, onAuthenticated }: LoginPageProps) {
       onAuthenticated(session.username)
     } catch (reason) {
       setError(
-        reason instanceof RAGAPIError
+        reason instanceof APIError
           ? reason.message
           : "Не удалось связаться с сервисом. Попробуйте ещё раз.",
       )
