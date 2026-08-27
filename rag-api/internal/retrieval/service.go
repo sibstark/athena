@@ -18,7 +18,6 @@ type Embedder interface {
 }
 type Searcher interface {
 	Search(context.Context, qdrant.SearchParams) ([]qdrant.Hit, error)
-	Collection() string
 }
 
 type Service struct {
@@ -30,8 +29,6 @@ type Service struct {
 func New(embedder Embedder, searcher Searcher, maxTopK int) *Service {
 	return &Service{embedder: embedder, searcher: searcher, maxTopK: maxTopK}
 }
-func (s *Service) Collection() string { return s.searcher.Collection() }
-
 func (s *Service) Search(ctx context.Context, options models.SearchOptions) ([]models.SearchResult, time.Duration, error) {
 	start := time.Now()
 	vector, err := s.embedder.EmbedQuery(ctx, options.Query)

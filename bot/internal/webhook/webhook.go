@@ -14,7 +14,6 @@ import (
 
 type WebhookOptions struct {
 	ApplicationToken string
-	Collection       string
 	TimeoutMs        int
 	Context          context.Context
 }

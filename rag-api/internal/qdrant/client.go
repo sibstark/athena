@@ -19,11 +19,11 @@ import (
 type Observer func(time.Duration, error)
 
 type Client struct {
-	baseURL    string
-	apiKey     string
-	collection string
-	http       *http.Client
-	observe    Observer
+	baseURL   string
+	apiKey    string
+	http      *http.Client
+	embedding models.EmbeddingConfig
+	observe   Observer
 }
 
 type Snapshot struct {
@@ -49,11 +49,9 @@ type SearchParams struct {
 	Filters        models.Filters
 }
 
-func New(baseURL, apiKey, collection string, timeout time.Duration, observer Observer) *Client {
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, collection: collection, http: &http.Client{Timeout: timeout}, observe: observer}
+func New(baseURL, apiKey string, timeout time.Duration, embedding models.EmbeddingConfig, observer Observer) *Client {
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), apiKey: apiKey, http: &http.Client{Timeout: timeout}, embedding: embedding, observe: observer}
 }
-
-func (c *Client) Collection() string { return c.collection }
 
 func (c *Client) ListCollections(ctx context.Context) ([]string, error) {
 	start := time.Now()
@@ -95,27 +93,38 @@ func (c *Client) listCollections(ctx context.Context) ([]string, error) {
 
 func (c *Client) Ready(ctx context.Context) error {
 	start := time.Now()
-	snapshot, err := c.Snapshot(ctx)
+	_, err := c.listCollections(ctx)
 	c.notify(time.Since(start), err)
-	if err != nil {
-		return err
-	}
-	if snapshot.Dimension != models.EmbeddingDimension || !strings.EqualFold(snapshot.Distance, "Cosine") {
+	return err
+}
+
+func (c *Client) validateSnapshot(snapshot Snapshot) error {
+	if snapshot.Dimension != c.embedding.Dimension || !strings.EqualFold(snapshot.Distance, "Cosine") {
 		return fmt.Errorf("%w: incompatible collection vectors %d/%s", models.ErrQdrantUnavailable, snapshot.Dimension, snapshot.Distance)
 	}
 	if !strings.EqualFold(snapshot.Status, "green") || snapshot.PointsCount <= 0 {
 		return fmt.Errorf("%w: collection is not ready (status=%s, points=%d)", models.ErrQdrantUnavailable, snapshot.Status, snapshot.PointsCount)
 	}
-	if model, _ := snapshot.Metadata["embedding_model"].(string); model != models.EmbeddingModel {
-		return fmt.Errorf("%w: incompatible embedding_model %q", models.ErrQdrantUnavailable, model)
+	expected := map[string]any{
+		"embedding_model":            c.embedding.ModelID,
+		"embedding_model_revision":   c.embedding.ModelRevision,
+		"embedding_dimension":        c.embedding.Dimension,
+		"embedding_dtype":            c.embedding.DType,
+		"embedding_pooling":          c.embedding.Pooling,
+		"embedding_normalized":       c.embedding.Normalized,
+		"document_prefix":            c.embedding.DocumentPrefix,
+		"embedding_pipeline_version": c.embedding.PipelineVersion,
+		"point_namespace":            c.embedding.PointNamespace,
 	}
-	if revision, _ := snapshot.Metadata["embedding_model_revision"].(string); revision != models.EmbeddingRevision {
-		return fmt.Errorf("%w: incompatible embedding revision %q", models.ErrQdrantUnavailable, revision)
+	for key, value := range expected {
+		if fmt.Sprint(snapshot.Metadata[key]) != fmt.Sprint(value) {
+			return fmt.Errorf("%w: incompatible %s %q", models.ErrQdrantUnavailable, key, snapshot.Metadata[key])
+		}
 	}
 	return nil
 }
 
-func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
+func (c *Client) Snapshot(ctx context.Context, collection string) (Snapshot, error) {
 	var response struct {
 		Result struct {
 			Status      string `json:"status"`
@@ -131,7 +140,7 @@ func (c *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 			} `json:"config"`
 		} `json:"result"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/collections/"+url.PathEscape(c.collection), nil, &response); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, "/collections/"+url.PathEscape(collection), nil, &response); err != nil {
 		return Snapshot{}, fmt.Errorf("%w: %v", models.ErrQdrantUnavailable, err)
 	}
 	return Snapshot{Status: response.Result.Status, PointsCount: response.Result.PointsCount, Dimension: response.Result.Config.Params.Vectors.Size, Distance: response.Result.Config.Params.Vectors.Distance, Metadata: response.Result.Config.Metadata}, nil
@@ -147,10 +156,7 @@ func (c *Client) Search(ctx context.Context, params SearchParams) ([]Hit, error)
 func (c *Client) search(ctx context.Context, params SearchParams) ([]Hit, error) {
 	collections := params.Collections
 	if len(collections) == 0 {
-		if c.collection == "" {
-			return nil, fmt.Errorf("qdrant collection is required")
-		}
-		collections = []string{c.collection}
+		return nil, fmt.Errorf("at least one qdrant collection is required")
 	}
 
 	results := make([][]Hit, len(collections))
@@ -187,6 +193,13 @@ func (c *Client) search(ctx context.Context, params SearchParams) ([]Hit, error)
 }
 
 func (c *Client) searchCollection(ctx context.Context, collection string, params SearchParams) ([]Hit, error) {
+	snapshot, err := c.Snapshot(ctx, collection)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.validateSnapshot(snapshot); err != nil {
+		return nil, err
+	}
 	body := map[string]any{"vector": params.Vector, "limit": params.Limit, "score_threshold": params.ScoreThreshold, "with_payload": true, "with_vector": false}
 	if filter := buildFilter(params.Filters); filter != nil {
 		body["filter"] = filter

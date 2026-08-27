@@ -90,11 +90,11 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err := config.LoadEnvironment(); err != nil {
 		return err
 	}
-	batchDefault, err := envPositiveInt("INDEXER_BATCH_SIZE", 16)
+	embedding, err := indexer.LoadEmbeddingConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("embedding configuration: %w", err)
 	}
-	cacheDefault, err := envPositiveInt("EMBEDDING_VECTOR_CACHE_SIZE", 256)
+	batchDefault, err := envPositiveInt("INDEXER_BATCH_SIZE", 16)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	var dryRun, forceReembed, prune, continueOnError bool
 	flags.StringVar(&runDirectory, "run", "", "chunks_<id> run directory")
 	flags.StringVar(&input, "input", "", "single chunks.jsonl file")
-	flags.StringVar(&collection, "collection", envString("QDRANT_COLLECTION", indexer.DefaultCollection), "Qdrant collection for single-file mode")
+	flags.StringVar(&collection, "collection", "", "Qdrant collection for single-file mode (required)")
 	flags.StringVar(&reportFile, "report", "", "output report path")
 	flags.StringVar(&qdrantURL, "qdrant-url", envString("QDRANT_URL", "http://127.0.0.1:6333"), "Qdrant base URL")
 	flags.StringVar(&teiURL, "tei-url", envString("TEI_URL", "http://127.0.0.1:8080"), "TEI base URL")
@@ -151,12 +151,10 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if !validLogLevel(logLevel) {
 		return fmt.Errorf("unknown log level %q", logLevel)
 	}
-	pipelineVersion := envString("EMBEDDING_PIPELINE_VERSION", indexer.DefaultPipeline)
-	vectorCacheSize := cacheDefault
 	common := indexer.RunConfig{
 		QdrantURL: qdrantURL, QdrantAPIKey: strings.TrimSpace(os.Getenv("QDRANT_API_KEY")), QdrantTimeout: qdrantTimeout,
-		TEIURL: teiURL, TEITimeout: teiTimeout, BatchSize: batchSize, PipelineVersion: pipelineVersion,
-		VectorCacheSize: vectorCacheSize, StoreEmbeddingText: storeEmbeddingText, DryRun: dryRun,
+		TEIURL: teiURL, TEITimeout: teiTimeout, BatchSize: batchSize, Embedding: embedding,
+		StoreEmbeddingText: storeEmbeddingText, DryRun: dryRun,
 		ForceReembed: forceReembed, ContinueOnError: continueOnError, LogLevel: logLevel,
 		Progress: func(message string) { fmt.Fprintln(stdout, message) },
 	}
@@ -180,7 +178,7 @@ func runIndex(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		InputFile: input, ReportFile: reportFile, Collection: collection,
 		QdrantURL: common.QdrantURL, QdrantAPIKey: common.QdrantAPIKey, QdrantTimeout: common.QdrantTimeout,
 		TEIURL: common.TEIURL, TEITimeout: common.TEITimeout, BatchSize: common.BatchSize,
-		PipelineVersion: common.PipelineVersion, VectorCacheSize: common.VectorCacheSize,
+		Embedding:          common.Embedding,
 		StoreEmbeddingText: common.StoreEmbeddingText, DryRun: common.DryRun, ForceReembed: common.ForceReembed,
 		Prune: prune, ContinueOnError: common.ContinueOnError, LogLevel: common.LogLevel,
 	}, indexer.Dependencies{})

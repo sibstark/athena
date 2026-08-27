@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sibstark/athena/rag-api/internal/models"
 )
 
 func TestEmbedQueryUsesExactE5Contract(t *testing.T) {
@@ -15,7 +17,8 @@ func TestEmbedQueryUsesExactE5Contract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/info":
-			json.NewEncoder(w).Encode(Info{ModelID: "Xenova/multilingual-e5-small", ModelSHA: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", MaxInputLength: 512, AutoTruncate: false})
+			embedding := testEmbedding()
+			json.NewEncoder(w).Encode(Info{ModelID: embedding.ModelID, ModelSHA: embedding.ModelRevision, MaxInputLength: embedding.MaxInputTokens, AutoTruncate: embedding.AutoTruncate})
 		case "/tokenize":
 			json.NewEncoder(w).Encode([]int{1, 2, 3})
 		case "/embed":
@@ -35,7 +38,7 @@ func TestEmbedQueryUsesExactE5Contract(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := New(server.URL, time.Second, nil)
+	client := New(server.URL, time.Second, testEmbedding(), nil)
 	vector, err := client.EmbedQuery(t.Context(), "query: вопрос")
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +46,7 @@ func TestEmbedQueryUsesExactE5Contract(t *testing.T) {
 	if embedded != "query: вопрос" {
 		t.Fatalf("input = %q", embedded)
 	}
-	if len(vector) != 384 {
+	if len(vector) != testEmbedding().Dimension {
 		t.Fatalf("dimension = %d", len(vector))
 	}
 }
@@ -51,7 +54,7 @@ func TestEmbedQueryUsesExactE5Contract(t *testing.T) {
 func TestEmbedQueryRejectsWrongDimension(t *testing.T) {
 	server := teiServer(t, [][]float64{{1}})
 	defer server.Close()
-	_, err := New(server.URL, time.Second, nil).EmbedQuery(t.Context(), "текст")
+	_, err := New(server.URL, time.Second, testEmbedding(), nil).EmbedQuery(t.Context(), "текст")
 	if err == nil || !strings.Contains(err.Error(), "dimension") {
 		t.Fatalf("error = %v", err)
 	}
@@ -66,7 +69,7 @@ func TestEmbedQueryReportsTEIError(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
-	_, err := New(server.URL, time.Second, nil).EmbedQuery(t.Context(), "текст")
+	_, err := New(server.URL, time.Second, testEmbedding(), nil).EmbedQuery(t.Context(), "текст")
 	if err == nil || !strings.Contains(err.Error(), "TEI unavailable") {
 		t.Fatalf("error = %v", err)
 	}
@@ -75,19 +78,19 @@ func TestEmbedQueryReportsTEIError(t *testing.T) {
 func TestValidateVectorRejectsInvalidValuesAndNorm(t *testing.T) {
 	vector := unitVector()
 	vector[1] = math.NaN()
-	if ValidateVector(vector) == nil {
+	if ValidateVector(vector, testEmbedding()) == nil {
 		t.Fatal("NaN accepted")
 	}
-	vector = make([]float64, 384)
+	vector = make([]float64, testEmbedding().Dimension)
 	vector[0] = 2
-	if ValidateVector(vector) == nil {
+	if ValidateVector(vector, testEmbedding()) == nil {
 		t.Fatal("invalid norm accepted")
 	}
 }
 
 func TestPrefixQueryReplacesKnownPrefix(t *testing.T) {
 	for input, want := range map[string]string{"текст": "query: текст", "query: текст": "query: текст", "passage: текст": "query: текст"} {
-		if got := PrefixQuery(input); got != want {
+		if got := PrefixQuery(input, testEmbedding().QueryPrefix); got != want {
 			t.Errorf("PrefixQuery(%q)=%q", input, got)
 		}
 	}
@@ -98,7 +101,8 @@ func teiServer(t *testing.T, vectors [][]float64) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/info":
-			json.NewEncoder(w).Encode(Info{ModelID: "Xenova/multilingual-e5-small", ModelSHA: "761b726dd34fb83930e26aab4e9ac3899aa1fa78", MaxInputLength: 512})
+			embedding := testEmbedding()
+			json.NewEncoder(w).Encode(Info{ModelID: embedding.ModelID, ModelSHA: embedding.ModelRevision, MaxInputLength: embedding.MaxInputTokens})
 		case "/tokenize":
 			json.NewEncoder(w).Encode([]int{1})
 		case "/embed":
@@ -110,4 +114,15 @@ func teiServer(t *testing.T, vectors [][]float64) *httptest.Server {
 		}
 	}))
 }
-func unitVector() []float64 { result := make([]float64, 384); result[0] = 1; return result }
+func unitVector() []float64 {
+	result := make([]float64, testEmbedding().Dimension)
+	result[0] = 1
+	return result
+}
+
+func testEmbedding() models.EmbeddingConfig {
+	return models.EmbeddingConfig{
+		ModelID: "test-model", ModelRevision: "test-revision", Dimension: 4,
+		Normalized: true, QueryPrefix: "query: ", MaxInputTokens: 32,
+	}
+}

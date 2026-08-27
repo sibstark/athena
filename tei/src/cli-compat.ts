@@ -54,9 +54,6 @@ const report = await runCompatibilityTest({
   topK: options.topK,
   batchSize: options.batchSize,
   dryRun: options.dryRun,
-  teiImage: config.teiImage,
-  teiImageDigest: config.teiImageDigest,
-  teiBackend: config.teiBackend,
   modelArtifact: config.modelArtifact,
   inputErrors: [...sample.errors, ...queryInput.errors],
 });

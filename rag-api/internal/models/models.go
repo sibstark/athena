@@ -14,12 +14,24 @@ var (
 	ErrGenerationInvalid = errors.New("generated answer failed validation")
 )
 
-const (
-	EmbeddingModel     = "Xenova/multilingual-e5-small"
-	EmbeddingRevision  = "761b726dd34fb83930e26aab4e9ac3899aa1fa78"
-	EmbeddingDimension = 384
-	QueryPrefix        = "query: "
-)
+type EmbeddingConfig struct {
+	ModelID               string
+	ModelRevision         string
+	Dimension             int
+	DType                 string
+	Pooling               string
+	Normalized            bool
+	DocumentPrefix        string
+	QueryPrefix           string
+	MaxInputTokens        int
+	AutoTruncate          bool
+	PipelineVersion       string
+	PointNamespace        string
+	TokenizerSHA256       string
+	TokenizerConfigSHA256 string
+	CacheDir              string
+	VectorCacheSize       int
+}
 
 type Filters struct {
 	DocumentID       string `json:"document_id,omitempty"`

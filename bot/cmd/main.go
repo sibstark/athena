@@ -47,8 +47,7 @@ func execute() int {
 
 func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	apiClient, err := api.New(cfg.ApiUrl, api.Options{
-		ApiKey:     cfg.ApiKey,
-		Collection: cfg.Collection,
+		ApiKey: cfg.ApiKey,
 	})
 	if err != nil {
 		return fmt.Errorf("API client initialization err %w", err)
@@ -66,7 +65,6 @@ func run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		Logger: logger,
 		Options: webhook.WebhookOptions{
 			ApplicationToken: cfg.ApplicationToken,
-			Collection:       cfg.Collection,
 			TimeoutMs:        cfg.RequestTimeoutMs,
 			Context:          ctx,
 		},

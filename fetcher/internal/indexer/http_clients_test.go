@@ -10,6 +10,7 @@ import (
 )
 
 func TestTEIClientExactContract(t *testing.T) {
+	embedding := testEmbeddingConfig()
 	calls := map[string]int{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls[request.URL.Path]++
@@ -19,11 +20,11 @@ func TestTEIClientExactContract(t *testing.T) {
 			writer.WriteHeader(http.StatusOK)
 			_, _ = writer.Write([]byte("{}"))
 		case "/info":
-			_ = json.NewEncoder(writer).Encode(map[string]any{"model_id": DefaultModel, "model_sha": DefaultModelRevision, "max_input_length": 512, "auto_truncate": false, "max_batch_requests": 4})
+			_ = json.NewEncoder(writer).Encode(map[string]any{"model_id": embedding.ModelID, "model_sha": embedding.ModelRevision, "max_input_length": embedding.MaxInputTokens, "auto_truncate": embedding.AutoTruncate, "max_batch_requests": 4})
 		case "/tokenize":
 			var body map[string]any
 			_ = json.NewDecoder(request.Body).Decode(&body)
-			if body["inputs"] != "passage: hello" || body["add_special_tokens"] != true {
+			if body["inputs"] != embedding.DocumentPrefix+"hello" || body["add_special_tokens"] != true {
 				t.Errorf("tokenize body = %#v", body)
 			}
 			_ = json.NewEncoder(writer).Encode([]int{1, 2, 3})
@@ -39,15 +40,15 @@ func TestTEIClientExactContract(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := NewTEIClient(server.URL, time.Second)
+	client := NewTEIClient(server.URL, time.Second, embedding)
 	if err := client.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	count, err := client.CountTokens(context.Background(), "passage: hello")
+	count, err := client.CountTokens(context.Background(), embedding.DocumentPrefix+"hello")
 	if err != nil || count != 3 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
-	vectors, err := client.EmbedDocuments(context.Background(), []string{"passage: hello"})
+	vectors, err := client.EmbedDocuments(context.Background(), []string{embedding.DocumentPrefix + "hello"})
 	if err != nil || len(vectors) != 1 {
 		t.Fatalf("vectors=%d err=%v", len(vectors), err)
 	}
@@ -80,13 +81,15 @@ func TestQdrantVectorReuseRequiresTEIBackend(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewQdrantClient(server.URL, "secret", time.Second)
-	vector, err := client.FindVector(context.Background(), "collection", VectorLookup{EmbeddingInputHash: "hash", Pipeline: pipeline("1")})
-	if err != nil || len(vector) != DefaultDimension {
+	embedding := testEmbeddingConfig()
+	vector, err := client.FindVector(context.Background(), "collection", VectorLookup{EmbeddingInputHash: "hash", Pipeline: pipeline(embedding)})
+	if err != nil || len(vector) != embedding.Dimension {
 		t.Fatalf("vector=%d err=%v", len(vector), err)
 	}
 }
 
 func TestQdrantCollectionCreationContract(t *testing.T) {
+	embedding := testEmbeddingConfig()
 	created := false
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -98,10 +101,10 @@ func TestQdrantCollectionCreationContract(t *testing.T) {
 			_ = json.NewDecoder(request.Body).Decode(&body)
 			vectors := body["vectors"].(map[string]any)
 			metadata := body["metadata"].(map[string]any)
-			if vectors["size"] != float64(DefaultDimension) || vectors["distance"] != "Cosine" {
+			if vectors["size"] != float64(embedding.Dimension) || vectors["distance"] != "Cosine" {
 				t.Errorf("vectors = %#v", vectors)
 			}
-			if metadata["embedding_model"] != DefaultModel || metadata["point_namespace"] != PointIDNamespace {
+			if metadata["embedding_model"] != embedding.ModelID || metadata["point_namespace"] != embedding.PointNamespace {
 				t.Errorf("metadata = %#v", metadata)
 			}
 			created = true
@@ -112,7 +115,7 @@ func TestQdrantCollectionCreationContract(t *testing.T) {
 	}))
 	defer server.Close()
 	client := NewQdrantClient(server.URL, "", time.Second)
-	state, err := client.EnsureCollection(context.Background(), "test", DefaultDimension, "Cosine", pipeline("1"), false)
+	state, err := client.EnsureCollection(context.Background(), "test", embedding.Dimension, "Cosine", pipeline(embedding), false)
 	if err != nil {
 		t.Fatal(err)
 	}

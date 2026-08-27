@@ -6,12 +6,12 @@ Go-адаптер для Bitrix24 Chat Bots 2.0 без собственной б
 Bitrix message → POST /v1/answer → Bitrix reply in the same dialog
 ```
 
-Бот отправляет в RAG API текущее сообщение и одну настроенную коллекцию:
+Перед каждым вопросом бот получает актуальный список через `GET /v1/collections`, затем отправляет в RAG API текущее сообщение и все найденные коллекции:
 
 ```json
 {
   "query": "Что такое ментальная арифметика?",
-  "collections": ["methodology_e5_small_v1"]
+  "collections": ["workspace_1", "workspace_7", "workspace_41"]
 }
 ```
 
@@ -30,7 +30,6 @@ BITRIX_BOT_ID=456
 BITRIX_BOT_TOKEN=the-bot-token-used-at-registration
 RAG_API_URL=http://rag-api:8080
 RAG_API_KEY=internal-rag-token
-BITRIX_BOT_COLLECTION=methodology_e5_small_v1
 BOT_REQUEST_TIMEOUT_MS=75000
 ```
 
@@ -85,7 +84,6 @@ BOT_ID=456 \
 BOT_TOKEN=... \
 API_URL=http://127.0.0.1:8090 \
 API_KEY=... \
-COLLECTION=methodology_e5_small_v1 \
 REQUEST_TIMEOUT_MS=75000 \
 go run ./cmd
 ```

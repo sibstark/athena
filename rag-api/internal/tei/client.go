@@ -20,11 +20,12 @@ import (
 type Observer func(time.Duration, error)
 
 type Client struct {
-	baseURL string
-	http    *http.Client
-	observe Observer
-	mu      sync.RWMutex
-	info    *Info
+	baseURL   string
+	http      *http.Client
+	embedding models.EmbeddingConfig
+	observe   Observer
+	mu        sync.RWMutex
+	info      *Info
 }
 
 type Info struct {
@@ -36,12 +37,12 @@ type Info struct {
 
 var knownPrefix = regexp.MustCompile(`^(?:passage|query):\s*`)
 
-func New(baseURL string, timeout time.Duration, observer Observer) *Client {
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: &http.Client{Timeout: timeout}, observe: observer}
+func New(baseURL string, timeout time.Duration, embedding models.EmbeddingConfig, observer Observer) *Client {
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), http: &http.Client{Timeout: timeout}, embedding: embedding, observe: observer}
 }
 
-func PrefixQuery(text string) string {
-	return models.QueryPrefix + knownPrefix.ReplaceAllString(text, "")
+func PrefixQuery(text, prefix string) string {
+	return prefix + knownPrefix.ReplaceAllString(text, "")
 }
 
 func (c *Client) Ready(ctx context.Context) error {
@@ -59,7 +60,7 @@ func (c *Client) ready(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", models.ErrTEIUnavailable, err)
 	}
-	if err := validateInfo(info); err != nil {
+	if err := c.validateInfo(info); err != nil {
 		return fmt.Errorf("%w: %v", models.ErrInvalidEmbedding, err)
 	}
 	c.mu.Lock()
@@ -76,27 +77,24 @@ func (c *Client) EmbedQuery(ctx context.Context, query string) ([]float64, error
 }
 
 func (c *Client) embedQuery(ctx context.Context, query string) ([]float64, error) {
-	input := PrefixQuery(query)
+	input := PrefixQuery(query, c.embedding.QueryPrefix)
 	info, err := c.cachedOrFetchInfo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrTEIUnavailable, err)
 	}
-	if err := validateInfo(info); err != nil {
+	if err := c.validateInfo(info); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrInvalidEmbedding, err)
 	}
 	count, err := c.countTokens(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("%w: tokenization failed: %v", models.ErrTEIUnavailable, err)
 	}
-	limit := info.MaxInputLength
-	if limit <= 0 {
-		limit = 512
-	}
+	limit := c.embedding.MaxInputTokens
 	if count > limit {
 		return nil, fmt.Errorf("%w: query input has %d tokens, maximum is %d", models.ErrInvalidEmbedding, count, limit)
 	}
 
-	body := map[string]any{"inputs": []string{input}, "normalize": true, "truncate": false}
+	body := map[string]any{"inputs": []string{input}, "normalize": c.embedding.Normalized, "truncate": c.embedding.AutoTruncate}
 	var vectors [][]float64
 	if err := c.doJSON(ctx, http.MethodPost, "/embed", body, &vectors); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrTEIUnavailable, err)
@@ -104,7 +102,7 @@ func (c *Client) embedQuery(ctx context.Context, query string) ([]float64, error
 	if len(vectors) != 1 {
 		return nil, fmt.Errorf("%w: TEI returned %d vectors", models.ErrInvalidEmbedding, len(vectors))
 	}
-	if err := ValidateVector(vectors[0]); err != nil {
+	if err := ValidateVector(vectors[0], c.embedding); err != nil {
 		return nil, fmt.Errorf("%w: %v", models.ErrInvalidEmbedding, err)
 	}
 	return vectors[0], nil
@@ -193,22 +191,25 @@ func (c *Client) doJSON(ctx context.Context, method, path string, body any, targ
 	return nil
 }
 
-func validateInfo(info Info) error {
-	if info.ModelID != models.EmbeddingModel {
-		return fmt.Errorf("expected model %s, got %s", models.EmbeddingModel, info.ModelID)
+func (c *Client) validateInfo(info Info) error {
+	if info.ModelID != c.embedding.ModelID {
+		return fmt.Errorf("expected model %s, got %s", c.embedding.ModelID, info.ModelID)
 	}
-	if info.ModelSHA != models.EmbeddingRevision {
-		return fmt.Errorf("expected model revision %s, got %s", models.EmbeddingRevision, info.ModelSHA)
+	if info.ModelSHA != c.embedding.ModelRevision {
+		return fmt.Errorf("expected model revision %s, got %s", c.embedding.ModelRevision, info.ModelSHA)
 	}
-	if info.AutoTruncate {
-		return errors.New("TEI auto_truncate must be false")
+	if info.MaxInputLength > 0 && info.MaxInputLength != c.embedding.MaxInputTokens {
+		return fmt.Errorf("expected max input length %d, got %d", c.embedding.MaxInputTokens, info.MaxInputLength)
+	}
+	if info.AutoTruncate != c.embedding.AutoTruncate {
+		return fmt.Errorf("expected TEI auto_truncate=%t, got %t", c.embedding.AutoTruncate, info.AutoTruncate)
 	}
 	return nil
 }
 
-func ValidateVector(vector []float64) error {
-	if len(vector) != models.EmbeddingDimension {
-		return fmt.Errorf("embedding dimension is %d, expected %d", len(vector), models.EmbeddingDimension)
+func ValidateVector(vector []float64, embedding models.EmbeddingConfig) error {
+	if len(vector) != embedding.Dimension {
+		return fmt.Errorf("embedding dimension is %d, expected %d", len(vector), embedding.Dimension)
 	}
 	normSquared := 0.0
 	for _, value := range vector {
@@ -218,7 +219,7 @@ func ValidateVector(vector []float64) error {
 		normSquared += value * value
 	}
 	norm := math.Sqrt(normSquared)
-	if norm < 0.99 || norm > 1.01 {
+	if embedding.Normalized && (norm < 0.99 || norm > 1.01) {
 		return fmt.Errorf("embedding L2 norm is %.6f, expected approximately 1", norm)
 	}
 	return nil

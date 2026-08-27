@@ -131,7 +131,7 @@ go run ./cmd/fetcher index \
 
 Все коллекции, которые участвуют в одном запросе, должны использовать совместимые параметры embedding pipeline:
 
-- `Xenova/multilingual-e5-small`;
+- embedding-модель из обязательного корневого `.env`;
 - закреплённая revision;
 - размерность 384;
 - Cosine.

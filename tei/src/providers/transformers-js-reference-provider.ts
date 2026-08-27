@@ -39,7 +39,7 @@ export class TransformersJsE5ReferenceProvider implements EmbeddingProvider {
       ? [nested as number[]]
       : nested as number[][];
     if (vectors.length !== texts.length) throw new Error("Transformers.js returned an invalid batch size.");
-    for (const vector of vectors) assertValidVector(vector, this.dimension);
+    for (const vector of vectors) assertValidVector(vector, this.dimension, E5_MODEL_CONTRACT.normalized);
     return vectors;
   }
 

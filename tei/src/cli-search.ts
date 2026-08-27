@@ -29,7 +29,7 @@ const qdrant = new ReadOnlyQdrantStore({
 
 const snapshot = await qdrant.snapshot();
 if (snapshot.dimension !== E5_MODEL_CONTRACT.dimension || snapshot.metadata.embedding_model !== E5_MODEL_CONTRACT.modelId || snapshot.metadata.embedding_model_revision !== E5_MODEL_CONTRACT.revision) {
-  throw new Error("Qdrant collection does not match the pinned Xenova/multilingual-e5-small contract.");
+  throw new Error("Qdrant collection does not match the embedding contract from .env.");
 }
 const [vector] = await tei.embedQueries([options.query]);
 const hits = await qdrant.search(vector!, options.limit);

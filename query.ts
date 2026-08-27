@@ -1,12 +1,28 @@
 #!/usr/bin/env bun
 
-const MODEL_ID = "Xenova/multilingual-e5-small";
-const MODEL_REVISION = "761b726dd34fb83930e26aab4e9ac3899aa1fa78";
-const VECTOR_DIMENSION = 384;
+const EMBEDDING = {
+  modelId: requiredEnv("EMBEDDING_MODEL_ID"),
+  revision: requiredEnv("EMBEDDING_MODEL_REVISION"),
+  dimension: positiveInteger(requiredEnv("EMBEDDING_DIMENSION"), "EMBEDDING_DIMENSION"),
+  dtype: requiredEnv("EMBEDDING_DTYPE"),
+  pooling: requiredEnv("EMBEDDING_POOLING"),
+  normalized: requiredBoolean("EMBEDDING_NORMALIZED"),
+  documentPrefix: requiredEnv("EMBEDDING_DOCUMENT_PREFIX", true),
+  queryPrefix: requiredEnv("EMBEDDING_QUERY_PREFIX", true),
+  maxInputTokens: positiveInteger(requiredEnv("EMBEDDING_MAX_INPUT_TOKENS"), "EMBEDDING_MAX_INPUT_TOKENS"),
+  autoTruncate: requiredBoolean("EMBEDDING_AUTO_TRUNCATE"),
+  pipelineVersion: requiredEnv("EMBEDDING_PIPELINE_VERSION"),
+  pointNamespace: requiredEnv("EMBEDDING_POINT_NAMESPACE"),
+  tokenizerSHA256: requiredEnv("EMBEDDING_TOKENIZER_SHA256"),
+  tokenizerConfigSHA256: requiredEnv("EMBEDDING_TOKENIZER_CONFIG_SHA256"),
+  cacheDir: requiredEnv("EMBEDDING_CACHE_DIR"),
+  vectorCacheSize: positiveInteger(requiredEnv("EMBEDDING_VECTOR_CACHE_SIZE"), "EMBEDDING_VECTOR_CACHE_SIZE"),
+};
+if (EMBEDDING.queryPrefix.trim() === "") throw new Error("EMBEDDING_QUERY_PREFIX обязателен.");
 
 const TEI_URL = (process.env.TEI_URL || "http://127.0.0.1:8080").replace(/\/+$/u, "");
 const QDRANT_URL = (process.env.QDRANT_URL || "http://127.0.0.1:6333").replace(/\/+$/u, "");
-const COLLECTION = process.env.QDRANT_COLLECTION || "methodology_e5_small_v1";
+const COLLECTION = requiredEnv("QDRANT_COLLECTION");
 const LIMIT = positiveInteger(process.env.SEARCH_LIMIT || "5", "SEARCH_LIMIT");
 const QDRANT_API_KEY = process.env.QDRANT_API_KEY?.trim();
 
@@ -42,14 +58,14 @@ try {
   validateTei(teiInfo);
   validateCollection(collectionInfo);
 
-  const modelInput = `query: ${query.replace(/^(?:query|passage):\s*/iu, "")}`;
+  const modelInput = `${EMBEDDING.queryPrefix}${query.replace(/^(?:query|passage):\s*/iu, "")}`;
   const embeddings = await requestJson(`${TEI_URL}/embed`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       inputs: [modelInput],
-      normalize: true,
-      truncate: false,
+      normalize: EMBEDDING.normalized,
+      truncate: EMBEDDING.autoTruncate,
     }),
   });
 
@@ -120,13 +136,13 @@ async function requestJson(url: string, init: RequestInit = {}): Promise<unknown
 
 function validateTei(value: unknown): void {
   const info = asRecord(value);
-  if (info.model_id !== MODEL_ID || info.model_sha !== MODEL_REVISION) {
+  if (info.model_id !== EMBEDDING.modelId || info.model_sha !== EMBEDDING.revision) {
     throw new Error(
-      `TEI использует ${String(info.model_id)}@${String(info.model_sha)}, ожидалась ${MODEL_ID}@${MODEL_REVISION}`,
+      `TEI использует ${String(info.model_id)}@${String(info.model_sha)}, ожидалась ${EMBEDDING.modelId}@${EMBEDDING.revision}`,
     );
   }
-  if (info.auto_truncate !== false) {
-    throw new Error("В TEI должен быть отключён auto_truncate.");
+  if (info.auto_truncate !== EMBEDDING.autoTruncate || info.max_input_length !== EMBEDDING.maxInputTokens) {
+    throw new Error("TEI не соответствует embedding-контракту из .env.");
   }
 }
 
@@ -138,10 +154,21 @@ function validateCollection(value: unknown): void {
   const vectors = asRecord(params.vectors);
   const metadata = asRecord(config.metadata);
 
-  if (vectors.size !== VECTOR_DIMENSION || String(vectors.distance).toLowerCase() !== "cosine") {
+  if (vectors.size !== EMBEDDING.dimension || String(vectors.distance).toLowerCase() !== "cosine") {
     throw new Error(`Коллекция ${COLLECTION} имеет несовместимую конфигурацию vectors.`);
   }
-  if (metadata.embedding_model !== MODEL_ID || metadata.embedding_model_revision !== MODEL_REVISION) {
+  const expectedMetadata: Record<string, unknown> = {
+    embedding_model: EMBEDDING.modelId,
+    embedding_model_revision: EMBEDDING.revision,
+    embedding_dimension: EMBEDDING.dimension,
+    embedding_dtype: EMBEDDING.dtype,
+    embedding_pooling: EMBEDDING.pooling,
+    embedding_normalized: EMBEDDING.normalized,
+    document_prefix: EMBEDDING.documentPrefix,
+    embedding_pipeline_version: EMBEDDING.pipelineVersion,
+    point_namespace: EMBEDDING.pointNamespace,
+  };
+  if (Object.entries(expectedMetadata).some(([key, expected]) => String(metadata[key]) !== String(expected))) {
     throw new Error(`Коллекция ${COLLECTION} создана другой embedding-моделью.`);
   }
 }
@@ -152,10 +179,10 @@ function extractVector(value: unknown): number[] {
   }
   const vector = value[0];
   if (
-    vector.length !== VECTOR_DIMENSION
+    vector.length !== EMBEDDING.dimension
     || !vector.every((item) => typeof item === "number" && Number.isFinite(item))
   ) {
-    throw new Error(`TEI вернул некорректный vector: ожидалось ${VECTOR_DIMENSION} конечных чисел.`);
+    throw new Error(`TEI вернул некорректный vector: ожидалось ${EMBEDDING.dimension} конечных чисел.`);
   }
   return vector as number[];
 }
@@ -187,4 +214,18 @@ function positiveInteger(value: string, name: string): number {
     throw new Error(`${name} должен быть положительным целым числом.`);
   }
   return parsed;
+}
+
+function requiredEnv(name: string, preserveWhitespace = false): string {
+  if (!(name in process.env)) throw new Error(`${name} обязателен.`);
+  const value = process.env[name] ?? "";
+  if (!preserveWhitespace && value.trim() === "") throw new Error(`${name} обязателен.`);
+  return preserveWhitespace ? value : value.trim();
+}
+
+function requiredBoolean(name: string): boolean {
+  const value = requiredEnv(name);
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} должен быть true или false.`);
 }

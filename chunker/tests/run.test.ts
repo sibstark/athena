@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { TokenCounter } from "../src/chunker.js";
-import { createE5TokenCounter, DEFAULT_TOKENIZER, DEFAULT_TOKENIZER_REVISION } from "../src/e5-token-counter.js";
+import { createE5TokenCounter } from "../src/e5-token-counter.js";
+import { loadEmbeddingConfig, type EmbeddingConfig } from "../src/embedding-config.js";
 import { chunkNormalizedRun } from "../src/run.js";
 
 const wordCounter: TokenCounter = {
@@ -30,6 +31,7 @@ describe("chunk run", () => {
       runDir: input,
       outputDir: output,
       tokenCounter: wordCounter,
+      embeddingConfig: testEmbeddingConfig(),
       targetTokens: 80,
       maxTokens: 120,
       minTokens: 1,
@@ -64,7 +66,7 @@ describe("chunk run", () => {
       document("page_2", "```plaintext\nНезакрытый блок"),
     ]);
 
-    const result = await chunkNormalizedRun({ runDir: input, outputDir: output, tokenCounter: wordCounter });
+    const result = await chunkNormalizedRun({ runDir: input, outputDir: output, tokenCounter: wordCounter, embeddingConfig: testEmbeddingConfig() });
 
     expect(result.report).toMatchObject({
       status: "complete_with_warnings",
@@ -101,7 +103,7 @@ describe("chunk run", () => {
     await writeFile(join(input, "workspace_1", "normalized.jsonl"), "{broken\n", "utf8");
     await writeFile(join(input, "workspace_1", "document_tree.json"), "{\"nodes\":[]}\n", "utf8");
 
-    const result = await chunkNormalizedRun({ runDir: input, outputDir: output, tokenCounter: wordCounter });
+    const result = await chunkNormalizedRun({ runDir: input, outputDir: output, tokenCounter: wordCounter, embeddingConfig: testEmbeddingConfig() });
 
     expect(result.report.status).toBe("failed");
     expect(await exists(join(output, "workspace_1", "chunks.jsonl"))).toBe(false);
@@ -112,24 +114,41 @@ describe("chunk run", () => {
     const root = await mkdtemp(join(tmpdir(), "athena-chunk-run-"));
     const input = join(root, "normalized_1");
     await writeRunFixture(input, [workspace(1, "complete")], "run_2");
-    await expect(chunkNormalizedRun({ runDir: input, outputDir: join(root, "chunks_1"), tokenCounter: wordCounter }))
+    await expect(chunkNormalizedRun({ runDir: input, outputDir: join(root, "chunks_1"), tokenCounter: wordCounter, embeddingConfig: testEmbeddingConfig() }))
       .rejects.toThrow("belongs to run_2, expected run_1");
-    await expect(chunkNormalizedRun({ runDir: input, outputDir: join(root, "chunks_2"), tokenCounter: wordCounter }))
+    await expect(chunkNormalizedRun({ runDir: input, outputDir: join(root, "chunks_2"), tokenCounter: wordCounter, embeddingConfig: testEmbeddingConfig() }))
       .rejects.toThrow("must be named chunks_1");
   });
 });
 
 it("loads the pinned E5 tokenizer directly from the local cache", async () => {
-  const cache = resolve("../var/models");
-  const tokenizerFile = join(cache, DEFAULT_TOKENIZER, DEFAULT_TOKENIZER_REVISION, "tokenizer.json");
+  let embedding: EmbeddingConfig;
+  try { embedding = loadEmbeddingConfig(); } catch { return; }
+  const cache = embedding.cacheDir;
+  const tokenizerFile = join(cache, embedding.modelId, embedding.modelRevision, "tokenizer.json");
   try {
     await access(tokenizerFile);
   } catch {
     return;
   }
-  const counter = await createE5TokenCounter({ modelId: DEFAULT_TOKENIZER, revision: DEFAULT_TOKENIZER_REVISION, cacheDir: cache });
+  const counter = await createE5TokenCounter({
+    modelId: embedding.modelId, revision: embedding.modelRevision, cacheDir: cache,
+    tokenizerSHA256: embedding.tokenizerSHA256, tokenizerConfigSHA256: embedding.tokenizerConfigSHA256,
+  });
   expect(counter.count("Путь: Тест\n\nРаздел: Пример")).toBe(10);
 });
+
+function testEmbeddingConfig(): EmbeddingConfig {
+  return {
+    modelId: "test-model", modelRevision: "test-revision", dimension: 4,
+    dtype: "test-dtype", pooling: "test-pooling", normalized: true,
+    documentPrefix: "document: ", queryPrefix: "query: ", maxInputTokens: 32,
+    autoTruncate: false, pipelineVersion: "test-pipeline",
+    pointNamespace: "12345678-1234-1234-1234-123456789abc",
+    tokenizerSHA256: "a".repeat(64), tokenizerConfigSHA256: "b".repeat(64),
+    cacheDir: resolve("test-cache"), vectorCacheSize: 8,
+  };
+}
 
 function workspace(id: number, status: string) {
   return {

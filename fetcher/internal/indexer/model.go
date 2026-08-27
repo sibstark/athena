@@ -6,15 +6,7 @@ import (
 )
 
 const (
-	DefaultModel         = "Xenova/multilingual-e5-small"
-	DefaultModelRevision = "761b726dd34fb83930e26aab4e9ac3899aa1fa78"
-	DefaultDType         = "q8"
-	DefaultDimension     = 384
-	DefaultPipeline      = "1"
-	DefaultCollection    = "methodology_e5_small_v1"
-	EmbeddingBackend     = "tei"
-	PointIDNamespace     = "a1f0e7c2-7a6b-5c74-9f3e-6c8d91b3a204"
-	maxModelTokens       = 512
+	EmbeddingBackend = "tei"
 )
 
 var payloadIndexes = []string{
@@ -34,8 +26,7 @@ type Config struct {
 	TEIURL             string
 	TEITimeout         time.Duration
 	BatchSize          int
-	PipelineVersion    string
-	VectorCacheSize    int
+	Embedding          EmbeddingConfig
 	StoreEmbeddingText bool
 	DryRun             bool
 	ForceReembed       bool
@@ -54,14 +45,32 @@ type RunConfig struct {
 	TEIURL             string
 	TEITimeout         time.Duration
 	BatchSize          int
-	PipelineVersion    string
-	VectorCacheSize    int
+	Embedding          EmbeddingConfig
 	StoreEmbeddingText bool
 	DryRun             bool
 	ForceReembed       bool
 	ContinueOnError    bool
 	LogLevel           string
 	Progress           func(string)
+}
+
+type EmbeddingConfig struct {
+	ModelID               string
+	ModelRevision         string
+	Dimension             int
+	DType                 string
+	Pooling               string
+	Normalized            bool
+	DocumentPrefix        string
+	QueryPrefix           string
+	MaxInputTokens        int
+	AutoTruncate          bool
+	PipelineVersion       string
+	PointNamespace        string
+	TokenizerSHA256       string
+	TokenizerConfigSHA256 string
+	CacheDir              string
+	VectorCacheSize       int
 }
 
 type ChunkMetadata struct {

@@ -2,29 +2,11 @@
 
 `tei/` — отдельный Bun/TypeScript-проект для работы с официальным Rust-сервисом Hugging Face Text Embeddings Inference. TypeScript не выполняет production inference: он вызывает TEI по HTTP, делает read-only поиск в Qdrant и сравнивает результаты с существующим Transformers.js pipeline.
 
-Во всех режимах разрешена только модель:
-
-```text
-Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78
-```
-
-Подмена на `intfloat/multilingual-e5-small` запрещена.
+Во всех режимах модель и полный embedding-контракт читаются только из обязательных `EMBEDDING_*` корневого `.env`. Хардкода и fallback в TypeScript нет.
 
 ## Запуск
 
-Официальная документация перечисляет ARM64 image, но на момент проверки тег `cpu-arm64-1.9` отсутствовал в GHCR (`manifest unknown`). Поэтому на Apple Silicon используется официальный amd64 image через Docker-эмуляцию:
-
-```env
-TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-TEI_PLATFORM=linux/amd64
-```
-
-На x86_64:
-
-```env
-TEI_IMAGE=ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-TEI_PLATFORM=linux/amd64
-```
+Образ TEI и `linux/amd64` явно закреплены в корневом Compose и не настраиваются через env.
 
 ```bash
 cd ..
@@ -36,15 +18,9 @@ curl -fsS http://127.0.0.1:8080/health
 curl -fsS http://127.0.0.1:8080/info
 ```
 
-`tei:up` сначала выполняет `tei:prepare`: берёт закреплённый `onnx/model_quantized.onnx` q8 из общего кеша `var/models`, размещает его в TEI Hub cache под ожидаемым именем `onnx/model.onnx`, записывает SHA-256 manifest и пересоздаёт только контейнер `embeddings`. Model ID/revision не меняются.
+`tei:up` сначала выполняет `tei:prepare`: берёт артефакт из `EMBEDDING_CACHE_DIR`, размещает его в TEI Hub cache, записывает SHA-256 manifest и пересоздаёт только контейнер `embeddings`.
 
-Кеш TEI хранится в `var/tei`, существующий q8-кеш Transformers.js — в `var/models`. После первого pull получите digest:
-
-```bash
-docker image inspect "$TEI_IMAGE" --format '{{index .RepoDigests 0}}'
-```
-
-Проверенный digest уже закреплён в Compose, `.env.example` и `tei/image-lock.json`. При обновлении TEI повторите inspect и compatibility test.
+Кеш TEI хранится в `var/tei`, кеш Transformers.js задаётся через `EMBEDDING_CACHE_DIR`. Digest образа закреплён непосредственно в Compose.
 
 ## Smoke search
 

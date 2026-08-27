@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -25,15 +26,25 @@ func Load() (Config, error) {
 	return Config{WebhookURL: webhookURL}, nil
 }
 
-// LoadEnvironment loads the optional local .env without requiring Bitrix
-// credentials. Commands such as normalize and index do not use the webhook.
+// LoadEnvironment loads the single repository-level .env without overriding
+// variables already provided by the process.
 func LoadEnvironment() error {
-	if _, err := os.Stat(".env"); err == nil {
-		if err := godotenv.Load(".env"); err != nil {
-			return fmt.Errorf("load .env: %w", err)
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve working directory: %w", err)
+	}
+	candidates := []string{filepath.Join(workingDirectory, ".env")}
+	if filepath.Base(workingDirectory) == "fetcher" {
+		candidates = []string{filepath.Join(workingDirectory, "..", ".env"), filepath.Join(workingDirectory, ".env")}
+	}
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			if err := godotenv.Load(candidate); err != nil {
+				return fmt.Errorf("load %s: %w", candidate, err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect %s: %w", candidate, err)
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect .env: %w", err)
 	}
 	return nil
 }

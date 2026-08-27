@@ -52,9 +52,19 @@ func Index(ctx context.Context, config Config, dependencies Dependencies) (Repor
 	started := time.Now()
 	normalizeConfig(&config)
 	report := newReport(config)
+	if strings.TrimSpace(config.Collection) == "" {
+		addError(&report, nil, nil, "configuration", fmt.Errorf("Qdrant collection is required"))
+		report.TotalMS = elapsedMS(started)
+		return report, writeReport(config.ReportFile, report)
+	}
+	if err := config.Embedding.Validate(); err != nil {
+		addError(&report, nil, nil, "configuration", err)
+		report.TotalMS = elapsedMS(started)
+		return report, writeReport(config.ReportFile, report)
+	}
 	provider := dependencies.Provider
 	if provider == nil {
-		provider = NewTEIClient(config.TEIURL, config.TEITimeout)
+		provider = NewTEIClient(config.TEIURL, config.TEITimeout, config.Embedding)
 	}
 	store := dependencies.Store
 	if store == nil {
@@ -70,7 +80,7 @@ func Index(ctx context.Context, config Config, dependencies Dependencies) (Repor
 	}
 	report.ProviderCheckMS = elapsedMS(providerStarted)
 
-	pipe := pipeline(config.PipelineVersion)
+	pipe := pipeline(config.Embedding)
 	qdrantStarted := time.Now()
 	if err := store.Ping(ctx); err != nil {
 		report.QdrantReadMS += elapsedMS(qdrantStarted)
@@ -81,7 +91,7 @@ func Index(ctx context.Context, config Config, dependencies Dependencies) (Repor
 	report.QdrantReadMS += elapsedMS(qdrantStarted)
 
 	qdrantStarted = time.Now()
-	state, err := store.EnsureCollection(ctx, config.Collection, DefaultDimension, "Cosine", pipe, config.DryRun)
+	state, err := store.EnsureCollection(ctx, config.Collection, config.Embedding.Dimension, "Cosine", pipe, config.DryRun)
 	report.QdrantReadMS += elapsedMS(qdrantStarted)
 	if err != nil {
 		addError(&report, nil, nil, "qdrant", err)
@@ -125,7 +135,7 @@ func Index(ctx context.Context, config Config, dependencies Dependencies) (Repor
 
 	batchCtx := &batchContext{
 		ctx: ctx, config: config, provider: provider, store: store, pipeline: pipe,
-		report: &report, cache: newVectorCache(config.VectorCacheSize),
+		report: &report, cache: newVectorCache(config.Embedding.VectorCacheSize),
 		seenInputHashes: make(map[string]struct{}), seenPointIDs: make(map[string]struct{}),
 		stalePointIDs: stale, collectionAvailable: collectionAvailable,
 	}
@@ -202,14 +212,14 @@ func processBatch(context *batchContext, input []rawLine) batchOutcome {
 	for _, item := range input {
 		chunk, err := parseChunk(item.value)
 		if err == nil {
-			input := embeddingInput(chunk.EmbeddingText)
+			input := embeddingInput(chunk.EmbeddingText, context.config.Embedding.DocumentPrefix)
 			count, tokenErr := context.provider.CountTokens(context.ctx, input)
 			if tokenErr != nil {
 				err = fmt.Errorf("tokenization failed: %w", tokenErr)
-			} else if count > maxModelTokens {
-				err = fmt.Errorf("model input has %d tokens; maximum is %d; re-run chunker with the E5 tokenizer limits", count, maxModelTokens)
+			} else if count > context.config.Embedding.MaxInputTokens {
+				err = fmt.Errorf("model input has %d tokens; maximum is %d; re-run chunker with the configured tokenizer limits", count, context.config.Embedding.MaxInputTokens)
 			} else {
-				id, idErr := pointID(chunk.ChunkID)
+				id, idErr := pointID(chunk.ChunkID, context.config.Embedding.PointNamespace)
 				if idErr != nil {
 					err = idErr
 				} else if _, duplicate := context.seenPointIDs[id]; duplicate {
@@ -357,7 +367,7 @@ func vectorize(context *batchContext, candidates []preparedChunk) ([]Point, erro
 			}
 		}
 		if vector != nil {
-			if err := validateVector(vector); err != nil {
+			if err := validateVector(vector, context.config.Embedding); err != nil {
 				return nil, err
 			}
 			vectors[hash] = vector
@@ -382,7 +392,7 @@ func vectorize(context *batchContext, candidates []preparedChunk) ([]Point, erro
 			return nil, fmt.Errorf("embedding provider returned %d vectors for %d inputs", len(computed), len(toEmbed))
 		}
 		for i, item := range toEmbed {
-			if err := validateVector(computed[i]); err != nil {
+			if err := validateVector(computed[i], context.config.Embedding); err != nil {
 				return nil, err
 			}
 			vectors[item.embeddingInputHash] = computed[i]
@@ -510,8 +520,8 @@ func requiresEmbedding(payload map[string]any, inputHash string, pipe PipelineId
 
 func newReport(config Config) Report {
 	return Report{InputFile: portableRelative(config.InputFile), Collection: config.Collection,
-		EmbeddingModel: DefaultModel, EmbeddingModelRevision: DefaultModelRevision,
-		EmbeddingPipelineVersion: config.PipelineVersion, EmbeddingBackend: EmbeddingBackend,
+		EmbeddingModel: config.Embedding.ModelID, EmbeddingModelRevision: config.Embedding.ModelRevision,
+		EmbeddingPipelineVersion: config.Embedding.PipelineVersion, EmbeddingBackend: EmbeddingBackend,
 		BatchSize: config.BatchSize, DryRun: config.DryRun, Errors: []ErrorEntry{}}
 }
 
@@ -532,17 +542,8 @@ func writeReport(path string, report Report) error {
 }
 
 func normalizeConfig(config *Config) {
-	if config.Collection == "" {
-		config.Collection = DefaultCollection
-	}
 	if config.BatchSize <= 0 {
 		config.BatchSize = 16
-	}
-	if config.PipelineVersion == "" {
-		config.PipelineVersion = DefaultPipeline
-	}
-	if config.VectorCacheSize <= 0 {
-		config.VectorCacheSize = 256
 	}
 	if config.TEIURL == "" {
 		config.TEIURL = "http://127.0.0.1:8080"

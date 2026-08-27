@@ -17,7 +17,6 @@ type Config struct {
 	BotToken         string
 	ApiUrl           string
 	ApiKey           string
-	Collection       string
 	RequestTimeoutMs int
 }
 
@@ -35,7 +34,6 @@ func Load() (Config, error) {
 		BotToken:         os.Getenv("BOT_TOKEN"),
 		ApiUrl:           os.Getenv("API_URL"),
 		ApiKey:           os.Getenv("API_KEY"),
-		Collection:       os.Getenv("COLLECTION"),
 		RequestTimeoutMs: envInt(os.Getenv("REQUEST_TIMEOUT_MS"), 5000),
 	}
 	return cfg, nil
@@ -67,7 +65,6 @@ func validateEnvirnonment() error {
 		"BOT_TOKEN",
 		"API_URL",
 		"API_KEY",
-		"COLLECTION",
 		"REQUEST_TIMEOUT_MS",
 	}
 	for _, key := range envNames {

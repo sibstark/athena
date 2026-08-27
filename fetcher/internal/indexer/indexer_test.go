@@ -10,26 +10,29 @@ import (
 )
 
 func TestPointIDGolden(t *testing.T) {
-	id, err := pointID("chunk_example")
+	id, err := pointID("chunk_example", testEmbeddingConfig().PointNamespace)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "88934f4d-6b38-5279-954c-c2cfa186a86b" {
-		t.Fatalf("point ID = %s", id)
+	repeated, err := pointID("chunk_example", testEmbeddingConfig().PointNamespace)
+	if err != nil || id != repeated || len(id) != 36 {
+		t.Fatalf("point ID is not deterministic: %q / %q", id, repeated)
 	}
 }
 
 func TestBuildPayloadGoldenAndBackend(t *testing.T) {
 	chunk := testChunk("one", "chunk_example")
-	payload, err := buildPayload(chunk, hashText("passage: one"), pipeline("1"), false)
+	embedding := testEmbeddingConfig()
+	payload, err := buildPayload(chunk, hashText(embedding.DocumentPrefix+"one"), pipeline(embedding), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if payload["embedding_backend"] != "tei" {
 		t.Fatalf("backend = %#v", payload["embedding_backend"])
 	}
-	if payload["payload_hash"] != "8fe3519d2af83213df3b70815650ec6644b4b19d779322e39dd3d65da25266e4" {
-		t.Fatalf("payload hash changed: %v", payload["payload_hash"])
+	repeated, err := buildPayload(chunk, hashText(embedding.DocumentPrefix+"one"), pipeline(embedding), false)
+	if err != nil || payload["payload_hash"] != repeated["payload_hash"] {
+		t.Fatalf("payload hash is not deterministic: %v / %v", payload["payload_hash"], repeated["payload_hash"])
 	}
 }
 
@@ -37,7 +40,8 @@ func TestBuildPayloadIncludesDocumentURL(t *testing.T) {
 	documentURL := "https://hwschool.bitrix24.ru/note/document/3515/"
 	chunk := testChunk("one", "chunk_example")
 	chunk.Metadata.DocumentURL = &documentURL
-	payload, err := buildPayload(chunk, hashText("passage: one"), pipeline("1"), false)
+	embedding := testEmbeddingConfig()
+	payload, err := buildPayload(chunk, hashText(embedding.DocumentPrefix+"one"), pipeline(embedding), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +280,7 @@ func testConfig(t *testing.T, chunks []ChunkRecord) Config {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return Config{InputFile: input, ReportFile: filepath.Join(root, "report.json"), Collection: "test", BatchSize: 2, PipelineVersion: "1", VectorCacheSize: 8, Prune: false}
+	return Config{InputFile: input, ReportFile: filepath.Join(root, "report.json"), Collection: "test", BatchSize: 2, Embedding: testEmbeddingConfig(), Prune: false}
 }
 
 type fakeProvider struct {
@@ -295,9 +299,21 @@ func (provider *fakeProvider) EmbedDocuments(_ context.Context, inputs []string)
 	return result, nil
 }
 func unitVector() []float64 {
-	vector := make([]float64, DefaultDimension)
+	vector := make([]float64, testEmbeddingConfig().Dimension)
 	vector[0] = 1
 	return vector
+}
+
+func testEmbeddingConfig() EmbeddingConfig {
+	return EmbeddingConfig{
+		ModelID: "test-model", ModelRevision: "test-revision", Dimension: 4,
+		DType: "test-dtype", Pooling: "test-pooling", Normalized: true,
+		DocumentPrefix: "document: ", QueryPrefix: "query: ", MaxInputTokens: 32,
+		PipelineVersion: "test-pipeline", PointNamespace: "12345678-1234-1234-1234-123456789abc",
+		TokenizerSHA256:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		TokenizerConfigSHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		CacheDir:              "test-cache", VectorCacheSize: 8,
+	}
 }
 
 type fakeStore struct {

@@ -23,9 +23,8 @@ import {
 } from "./text.js";
 import {
   createE5TokenCounter,
-  DEFAULT_TOKENIZER,
-  DEFAULT_TOKENIZER_REVISION,
 } from "./e5-token-counter.js";
+import { loadEmbeddingConfig } from "./embedding-config.js";
 
 export interface TokenCounter {
   readonly name: string;
@@ -169,8 +168,6 @@ export interface ChunkOptions {
   minTokens?: number;
   overlapTokens?: number;
   tokenCounter?: TokenCounter;
-  tokenizer?: string;
-  tokenizerRevision?: string;
   tokenizerCacheDir?: string;
   force?: boolean;
   onProgress?: (message: string) => void;
@@ -362,16 +359,13 @@ export async function chunkNormalizedDocuments(
 }
 
 async function createDefaultTokenCounter(options: ChunkOptions): Promise<TokenCounter> {
-  if (options.tokenizer === "unicode-heuristic-v1") return new UnicodeHeuristicTokenCounter();
-  const modelId = options.tokenizer ?? process.env.EMBEDDING_MODEL?.trim() ?? DEFAULT_TOKENIZER;
+  const embedding = loadEmbeddingConfig();
   return createE5TokenCounter({
-    modelId,
-    revision:
-      options.tokenizerRevision ??
-      process.env.EMBEDDING_MODEL_REVISION?.trim() ??
-      DEFAULT_TOKENIZER_REVISION,
-    cacheDir:
-      options.tokenizerCacheDir ?? process.env.EMBEDDING_CACHE_DIR?.trim() ?? "../var/models",
+    modelId: embedding.modelId,
+    revision: embedding.modelRevision,
+    cacheDir: options.tokenizerCacheDir ?? embedding.cacheDir,
+    tokenizerSHA256: embedding.tokenizerSHA256,
+    tokenizerConfigSHA256: embedding.tokenizerConfigSHA256,
   });
 }
 

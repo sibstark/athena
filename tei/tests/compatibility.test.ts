@@ -6,10 +6,10 @@ import type { EmbeddingProvider } from "../src/providers/embedding-provider.js";
 import type { TeiE5EmbeddingProvider } from "../src/providers/tei-e5-provider.js";
 import type { ReadOnlyQdrantStore } from "../src/qdrant/read-only-qdrant-store.js";
 
-const unit = (axis = 0) => Array.from({ length: 384 }, (_, index) => index === axis ? 1 : 0);
+const unit = (axis = 0) => Array.from({ length: E5_MODEL_CONTRACT.dimension }, (_, index) => index === axis ? 1 : 0);
 
 describe("compatibility verdict", () => {
-  it("returns PASS_STRICT for the exact staged Xenova q8 artifact and compatible retrieval", async () => {
+  it("returns PASS_STRICT for the exact configured artifact and compatible retrieval", async () => {
     const report = await runCompatibilityTest(setup(unit(), unit()));
     expect(report.pipeline_comparison).toMatchObject({ compatible: true, exact_match: true });
     expect(report.verdict).toBe("PASS_STRICT");
@@ -62,9 +62,6 @@ function setup(stored: number[], generated: number[]) {
     tei: new FakeTei(generated, queryVector) as unknown as TeiE5EmbeddingProvider,
     reference: new FakeReference(queryVector),
     topK: 10,
-    teiImage: "official:cpu-arm64-1.9",
-    teiImageDigest: "sha256:test",
-    teiBackend: "onnxruntime",
     modelArtifact: {
       model_id: E5_MODEL_CONTRACT.modelId,
       revision: E5_MODEL_CONTRACT.revision,
@@ -78,7 +75,7 @@ function setup(stored: number[], generated: number[]) {
 
 class FakeTei {
   constructor(private readonly documentVector: number[], private readonly queryVector = unit()) {}
-  async getInfo() { return { model_id: E5_MODEL_CONTRACT.modelId, model_sha: E5_MODEL_CONTRACT.revision, model_dtype: "int8", max_input_length: 512, auto_truncate: false, version: "1.9.3", backend: "ort" }; }
+  async getInfo() { return { model_id: E5_MODEL_CONTRACT.modelId, model_sha: E5_MODEL_CONTRACT.revision, model_dtype: "test-dtype", max_input_length: E5_MODEL_CONTRACT.maxInputTokens, auto_truncate: E5_MODEL_CONTRACT.autoTruncate, version: "test-version", backend: "test-backend" }; }
   async embedDocuments(texts: string[]) { return texts.map(() => this.documentVector); }
   async embedQueries(texts: string[]) { return texts.map(() => this.queryVector); }
 }
@@ -86,7 +83,7 @@ class FakeTei {
 class FakeReference implements EmbeddingProvider {
   readonly modelId = E5_MODEL_CONTRACT.modelId;
   readonly revision = E5_MODEL_CONTRACT.revision;
-  readonly dimension = 384;
+  readonly dimension = E5_MODEL_CONTRACT.dimension;
   constructor(private readonly vector: number[]) {}
   async embedDocuments(texts: string[]) { return texts.map(() => this.vector); }
   async embedQueries(texts: string[]) { return texts.map(() => this.vector); }
@@ -104,7 +101,7 @@ function snapshot(): CollectionSnapshot {
     name: "methodology_e5_small_v1",
     status: "green",
     pointsCount: 1,
-    dimension: 384,
+    dimension: E5_MODEL_CONTRACT.dimension,
     distance: "Cosine",
     metadata: {
       embedding_model: E5_MODEL_CONTRACT.modelId,

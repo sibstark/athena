@@ -7,13 +7,12 @@ cd chunker
 bun install
 bun run chunk -- \
   --run ../data/normalized/normalized_1787220682160 \
-  --out ../data/chunks/chunks_1787220682160 \
-  --tokenizer-cache ../var/models
+  --out ../data/chunks/chunks_1787220682160
 ```
 
 Имена обязаны образовывать одну цепочку: `run_<id> → normalized_<id> → chunks_<id>`. В `chunks_<id>` создаются `chunks_manifest.json`, общий `chunks_report.json` и отдельные `workspace_<id>/chunks.jsonl` с `chunk_report.json`.
 
-Chunker использует только закреплённый `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. `tokenizer.json` и `tokenizer_config.json` читаются напрямую из общего кеша и проверяются по SHA-256; сетевого fallback нет. Путь задаётся через `--tokenizer-cache`, `EMBEDDING_CACHE_DIR` или по умолчанию `../var/models`.
+Chunker требует полный контракт `EMBEDDING_*` из корневого `.env`. `tokenizer.json` и `tokenizer_config.json` читаются из `EMBEDDING_CACHE_DIR` и проверяются по заданным там SHA-256; сетевого и модельного fallback нет.
 
 Каждый `embedding_text` проверяется тем же токенизатором и не может превышать `maxTokens` (по умолчанию 450). Длинные атомарные значения, строки таблиц, code- и HTML-блоки принудительно делятся, поэтому indexer не получает входы длиннее лимита embedding-модели.
 
@@ -31,7 +30,6 @@ bun run chunk -- \
   --tree ../data/normalized/normalized_1787220682160/workspace_17/document_tree.json \
   --output /tmp/workspace_17/chunks.jsonl \
   --report /tmp/workspace_17/chunk_report.json \
-  --tokenizer-cache ../var/models \
   --force
 ```
 

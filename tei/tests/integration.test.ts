@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runtimeConfig } from "../src/config.js";
+import { E5_MODEL_CONTRACT } from "../src/model-contract.js";
 import { TeiE5EmbeddingProvider } from "../src/providers/tei-e5-provider.js";
 import { ReadOnlyQdrantStore } from "../src/qdrant/read-only-qdrant-store.js";
 
@@ -12,7 +13,7 @@ describe.skipIf(!enabled)("real TEI and Qdrant", () => {
     const store = new ReadOnlyQdrantStore({ url: config.qdrantUrl, collection: config.collection, ...(config.qdrantApiKey ? { apiKey: config.qdrantApiKey } : {}) });
     const before = await store.snapshot();
     const [vector] = await tei.embedQueries(["Проверка совместимости"]);
-    expect(vector).toHaveLength(384);
+    expect(vector).toHaveLength(E5_MODEL_CONTRACT.dimension);
     await store.search(vector!, 1);
     expect(await store.snapshot()).toEqual(before);
   }, 180_000);

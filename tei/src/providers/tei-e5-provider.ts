@@ -32,8 +32,11 @@ export class TeiE5EmbeddingProvider implements EmbeddingProvider {
     if (this.cachedInfo) return this.cachedInfo;
     const info = await this.request<TeiInfo>("/info", { method: "GET" }, signal);
     assertExactModel(String(info.model_id ?? ""), typeof info.model_sha === "string" ? info.model_sha : null);
-    if (info.auto_truncate !== false) {
-      throw new Error(`TEI auto_truncate must be false; reported ${String(info.auto_truncate)}.`);
+    if (info.auto_truncate !== E5_MODEL_CONTRACT.autoTruncate) {
+      throw new Error(`TEI auto_truncate must be ${String(E5_MODEL_CONTRACT.autoTruncate)}; reported ${String(info.auto_truncate)}.`);
+    }
+    if (typeof info.max_input_length === "number" && info.max_input_length !== E5_MODEL_CONTRACT.maxInputTokens) {
+      throw new Error(`TEI max_input_length must be ${E5_MODEL_CONTRACT.maxInputTokens}; reported ${info.max_input_length}.`);
     }
     this.cachedInfo = info;
     return info;
@@ -60,7 +63,7 @@ export class TeiE5EmbeddingProvider implements EmbeddingProvider {
     if (texts.length === 0) return [];
     const info = await this.getInfo(signal);
     const inputs = texts.map((text) => prefixInput(text, kind));
-    const limit = typeof info.max_input_length === "number" ? info.max_input_length : 512;
+    const limit = E5_MODEL_CONTRACT.maxInputTokens;
     for (let index = 0; index < inputs.length; index += 1) {
       const count = await this.countTokens(inputs[index]!, signal);
       if (count > limit) {
@@ -76,7 +79,7 @@ export class TeiE5EmbeddingProvider implements EmbeddingProvider {
       const batch = inputs.slice(offset, offset + maxBatch);
       const vectors = await this.request<unknown>(
         "/embed",
-        jsonRequest({ inputs: batch, normalize: true, truncate: false }),
+        jsonRequest({ inputs: batch, normalize: E5_MODEL_CONTRACT.normalized, truncate: E5_MODEL_CONTRACT.autoTruncate }),
         signal,
       );
       if (!Array.isArray(vectors) || vectors.length !== batch.length) {
@@ -87,7 +90,7 @@ export class TeiE5EmbeddingProvider implements EmbeddingProvider {
           throw new Error("TEI returned a non-numeric embedding.");
         }
         const typed = vector as number[];
-        assertValidVector(typed, this.dimension);
+        assertValidVector(typed, this.dimension, E5_MODEL_CONTRACT.normalized);
         output.push(typed);
       }
     }

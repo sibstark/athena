@@ -46,7 +46,7 @@ func IndexRun(ctx context.Context, config RunConfig, dependencies Dependencies) 
 	}
 	provider := dependencies.Provider
 	if provider == nil {
-		provider = NewTEIClient(config.TEIURL, config.TEITimeout)
+		provider = NewTEIClient(config.TEIURL, config.TEITimeout, config.Embedding)
 	}
 	store := dependencies.Store
 	if store == nil {
@@ -77,7 +77,7 @@ func IndexRun(ctx context.Context, config RunConfig, dependencies Dependencies) 
 			InputFile: paths.chunks, ReportFile: paths.indexReport, Collection: workspace.QdrantCollection,
 			QdrantURL: config.QdrantURL, QdrantAPIKey: config.QdrantAPIKey, QdrantTimeout: config.QdrantTimeout,
 			TEIURL: config.TEIURL, TEITimeout: config.TEITimeout, BatchSize: config.BatchSize,
-			PipelineVersion: config.PipelineVersion, VectorCacheSize: config.VectorCacheSize,
+			Embedding:          config.Embedding,
 			StoreEmbeddingText: config.StoreEmbeddingText, DryRun: config.DryRun,
 			ForceReembed: config.ForceReembed, Prune: true, ContinueOnError: config.ContinueOnError,
 			LogLevel: config.LogLevel, Progress: config.Progress,
@@ -320,15 +320,14 @@ func writeRunReport(path string, report RunReport) error {
 
 func normalizeRunConfig(config *RunConfig) {
 	base := Config{QdrantURL: config.QdrantURL, QdrantTimeout: config.QdrantTimeout, TEIURL: config.TEIURL, TEITimeout: config.TEITimeout,
-		BatchSize: config.BatchSize, PipelineVersion: config.PipelineVersion, VectorCacheSize: config.VectorCacheSize}
+		BatchSize: config.BatchSize, Embedding: config.Embedding}
 	normalizeConfig(&base)
 	config.QdrantURL = base.QdrantURL
 	config.QdrantTimeout = base.QdrantTimeout
 	config.TEIURL = base.TEIURL
 	config.TEITimeout = base.TEITimeout
 	config.BatchSize = base.BatchSize
-	config.PipelineVersion = base.PipelineVersion
-	config.VectorCacheSize = base.VectorCacheSize
+	config.Embedding = base.Embedding
 	if config.ReportFile == "" {
 		config.ReportFile = filepath.Join(config.RunDir, "index-report.json")
 	}

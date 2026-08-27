@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { E5_MODEL_CONTRACT } from "./model-contract.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const sourceRoot = join(repoRoot, "var/models", E5_MODEL_CONTRACT.modelId, E5_MODEL_CONTRACT.revision);
+const sourceRoot = join(E5_MODEL_CONTRACT.cacheDir, E5_MODEL_CONTRACT.modelId, E5_MODEL_CONTRACT.revision);
 const snapshotRoot = join(
   repoRoot,
   "var/tei",

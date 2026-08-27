@@ -1,13 +1,6 @@
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { readFileSync } from "node:fs";
-import { config as loadEnv } from "dotenv";
-import { E5_MODEL_CONTRACT, assertExactModel } from "./model-contract.js";
-
-const PROJECT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const REPO_ROOT = resolve(PROJECT_DIR, "..");
-loadEnv({ path: join(REPO_ROOT, ".env"), quiet: true });
-loadEnv({ path: join(PROJECT_DIR, ".env"), override: true, quiet: true });
+import { E5_MODEL_CONTRACT, REPO_ROOT, assertExactModel } from "./model-contract.js";
 
 export interface RuntimeConfig {
   teiUrl: string;
@@ -16,9 +9,6 @@ export interface RuntimeConfig {
   collection: string;
   cacheDir: string;
   timeoutMs: number;
-  teiImage: string;
-  teiImageDigest: string | null;
-  teiBackend: string;
   modelArtifact: PreparedModelArtifact | null;
 }
 
@@ -32,28 +22,23 @@ export interface PreparedModelArtifact {
 }
 
 export function runtimeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
-  const modelId = process.env.TEI_MODEL_ID?.trim() || E5_MODEL_CONTRACT.modelId;
-  const revision = process.env.TEI_MODEL_REVISION?.trim() || E5_MODEL_CONTRACT.revision;
-  assertExactModel(modelId, revision);
-  const pooling = process.env.TEI_POOLING?.trim() || E5_MODEL_CONTRACT.pooling;
-  if (pooling !== E5_MODEL_CONTRACT.pooling) throw new Error(`TEI pooling must be ${E5_MODEL_CONTRACT.pooling}.`);
-  if (!/^(?:false|0|no)$/iu.test(process.env.TEI_AUTO_TRUNCATE?.trim() || "false")) {
-    throw new Error("TEI_AUTO_TRUNCATE must be false.");
-  }
   return {
     teiUrl: overrides.teiUrl ?? process.env.TEI_URL?.trim() ?? "http://127.0.0.1:8080",
     qdrantUrl: overrides.qdrantUrl ?? process.env.QDRANT_URL?.trim() ?? "http://127.0.0.1:6333",
     ...(overrides.qdrantApiKey ?? process.env.QDRANT_API_KEY?.trim()
       ? { qdrantApiKey: overrides.qdrantApiKey ?? process.env.QDRANT_API_KEY!.trim() }
       : {}),
-    collection: overrides.collection ?? process.env.QDRANT_COLLECTION?.trim() ?? "methodology_e5_small_v1",
-    cacheDir: overrides.cacheDir ?? resolve(REPO_ROOT, process.env.EMBEDDING_CACHE_DIR?.trim() || "var/models"),
+    collection: overrides.collection ?? required("QDRANT_COLLECTION"),
+    cacheDir: overrides.cacheDir ?? E5_MODEL_CONTRACT.cacheDir,
     timeoutMs: overrides.timeoutMs ?? positiveInt(process.env.TEI_REQUEST_TIMEOUT_MS, 30_000),
-    teiImage: overrides.teiImage ?? process.env.TEI_IMAGE?.trim() ?? "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
-    teiImageDigest: overrides.teiImageDigest ?? (process.env.TEI_IMAGE_DIGEST?.trim() || "sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07"),
-    teiBackend: overrides.teiBackend ?? process.env.TEI_BACKEND?.trim() ?? "onnxruntime",
     modelArtifact: overrides.modelArtifact ?? readPreparedModelArtifact(),
   };
+}
+
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required.`);
+  return value;
 }
 
 function readPreparedModelArtifact(): PreparedModelArtifact | null {

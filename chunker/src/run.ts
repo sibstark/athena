@@ -7,11 +7,8 @@ import {
 } from "./chunker.js";
 import {
   createE5TokenCounter,
-  DEFAULT_TOKENIZER,
-  DEFAULT_TOKENIZER_CONFIG_SHA256,
-  DEFAULT_TOKENIZER_REVISION,
-  DEFAULT_TOKENIZER_SHA256,
 } from "./e5-token-counter.js";
+import { loadEmbeddingConfig, type EmbeddingConfig } from "./embedding-config.js";
 
 export const CHUNKS_MANIFEST_FORMAT_VERSION = 2;
 
@@ -24,6 +21,7 @@ export interface ChunkRunOptions {
   overlapTokens?: number;
   tokenizerCacheDir?: string;
   tokenCounter?: TokenCounter;
+  embeddingConfig?: EmbeddingConfig;
   now?: () => Date;
   onProgress?: (message: string) => void;
 }
@@ -106,6 +104,7 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
   const runDir = resolve(options.runDir);
   const outputDir = resolve(options.outputDir);
   const log = options.onProgress ?? (() => undefined);
+  const embedding = options.embeddingConfig ?? loadEmbeddingConfig();
   validateSeparatedPaths(runDir, outputDir);
 
   const sourceNormalization = basename(runDir);
@@ -132,9 +131,11 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
   };
   validateLimits(limits);
   const tokenCounter = options.tokenCounter ?? await createE5TokenCounter({
-    modelId: DEFAULT_TOKENIZER,
-    revision: DEFAULT_TOKENIZER_REVISION,
-    cacheDir: options.tokenizerCacheDir ?? process.env.EMBEDDING_CACHE_DIR?.trim() ?? "../var/models",
+    modelId: embedding.modelId,
+    revision: embedding.modelRevision,
+    cacheDir: options.tokenizerCacheDir ?? embedding.cacheDir,
+    tokenizerSHA256: embedding.tokenizerSHA256,
+    tokenizerConfigSHA256: embedding.tokenizerConfigSHA256,
   });
 
   await mkdir(dirname(outputDir), { recursive: true });
@@ -164,10 +165,10 @@ export async function chunkNormalizedRun(options: ChunkRunOptions): Promise<Chun
       sourceRun: manifest.sourceRun,
       sourceNormalization,
       tokenizer: {
-        model: DEFAULT_TOKENIZER,
-        revision: DEFAULT_TOKENIZER_REVISION,
-        sha256: DEFAULT_TOKENIZER_SHA256,
-        configSha256: DEFAULT_TOKENIZER_CONFIG_SHA256,
+        model: embedding.modelId,
+        revision: embedding.modelRevision,
+        sha256: embedding.tokenizerSHA256,
+        configSha256: embedding.tokenizerConfigSHA256,
       },
       limits,
       workspaces: workspaceResults,

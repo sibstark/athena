@@ -184,7 +184,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.Found(len(results))
-	writeJSON(w, http.StatusOK, models.SearchResponse{RequestID: requestID(r.Context()), Query: options.Query, Results: results, Retrieval: models.RetrievalInfo{Collections: append([]string(nil), options.Collections...), EmbeddingModel: models.EmbeddingModel, Returned: len(results), DurationMS: duration.Milliseconds()}})
+	writeJSON(w, http.StatusOK, models.SearchResponse{RequestID: requestID(r.Context()), Query: options.Query, Results: results, Retrieval: models.RetrievalInfo{Collections: append([]string(nil), options.Collections...), EmbeddingModel: s.cfg.Embedding.ModelID, Returned: len(results), DurationMS: duration.Milliseconds()}})
 }
 
 func (s *Server) answer(w http.ResponseWriter, r *http.Request) {

@@ -19,7 +19,7 @@ CLI не вызывают внешние сервисы автоматическ
 
 `fetcher` сохраняет снимок в `run_<id>` и нормализует его в отдельный `normalized_<id>`. TypeScript chunker одним запуском обрабатывает все объявленные workspace и создаёт `chunks_<id>`. После этого Go-indexer синхронизирует каждую успешную workspace-коллекцию с Qdrant через внешний TEI.
 
-Во всех embedding-компонентах закреплена одна модель: `Xenova/multilingual-e5-small@761b726dd34fb83930e26aab4e9ac3899aa1fa78`. Автоматическая подмена модели запрещена.
+Все embedding-компоненты используют единый обязательный контракт `EMBEDDING_*` из корневого `.env`. Значений модели и fallback в коде нет.
 
 ## Общий Qdrant
 
@@ -33,7 +33,7 @@ docker compose logs -f qdrant
 docker compose down
 ```
 
-Qdrant доступен только на `127.0.0.1:${QDRANT_PORT:-6333}`. Данные и snapshots сохраняются в `var/qdrant/`. Версия образа закреплена через `QDRANT_VERSION`.
+Qdrant доступен только на `127.0.0.1:${QDRANT_PORT:-6333}`. Данные и snapshots сохраняются в `var/qdrant/`. Версия образа явно закреплена в Compose.
 
 ## Rust TEI
 

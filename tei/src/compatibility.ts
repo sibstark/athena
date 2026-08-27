@@ -56,9 +56,6 @@ export async function runCompatibilityTest(options: {
   topK: number;
   batchSize?: number;
   dryRun?: boolean;
-  teiImage: string;
-  teiImageDigest: string | null;
-  teiBackend?: string;
   modelArtifact?: PreparedModelArtifact | null;
   inputErrors?: string[];
 }): Promise<CompatibilityReport> {
@@ -273,7 +270,7 @@ function passesRetrieval(summary: Record<string, unknown>, thresholds: Compatibi
     && (drop === null || drop <= thresholds.maxRecall5Drop);
 }
 
-function finish(verdict: Verdict, info: TeiInfo, before: CollectionSnapshot, after: CollectionSnapshot, pipeline: Record<string, unknown>, documents: Record<string, unknown>, queries: Record<string, unknown>, thresholds: CompatibilityThresholds, warnings: string[], errors: string[], options: { teiImage: string; teiImageDigest: string | null; teiBackend?: string; modelArtifact?: PreparedModelArtifact | null }, retrieval: Record<string, unknown> = {}): CompatibilityReport {
+function finish(verdict: Verdict, info: TeiInfo, before: CollectionSnapshot, after: CollectionSnapshot, pipeline: Record<string, unknown>, documents: Record<string, unknown>, queries: Record<string, unknown>, thresholds: CompatibilityThresholds, warnings: string[], errors: string[], options: { modelArtifact?: PreparedModelArtifact | null }, retrieval: Record<string, unknown> = {}): CompatibilityReport {
   const unchanged = stableJson(before) === stableJson(after);
   return {
     verdict,
@@ -281,10 +278,8 @@ function finish(verdict: Verdict, info: TeiInfo, before: CollectionSnapshot, aft
     read_only: true,
     tei: {
       version: info.version ?? null,
-      image: options.teiImage,
-      image_digest: options.teiImageDigest,
       architecture: process.arch,
-      backend: info.backend ?? options.teiBackend ?? null,
+      backend: info.backend ?? null,
       model_id: info.model_id ?? null,
       model_revision: info.model_sha ?? null,
       model_dtype_reported: info.model_dtype ?? null,
@@ -307,7 +302,7 @@ function finish(verdict: Verdict, info: TeiInfo, before: CollectionSnapshot, aft
 }
 
 function recommendation(verdict: Verdict): string {
-  if (verdict === "PASS_STRICT" || verdict === "PASS") return "Keep the existing collection and use TEI with Xenova/multilingual-e5-small for query embeddings.";
+  if (verdict === "PASS_STRICT" || verdict === "PASS") return `Keep the existing collection and use TEI with ${E5_MODEL_CONTRACT.modelId} for query embeddings.`;
   if (verdict === "WARN") return "Keep the existing collection unchanged and review the reported differences manually.";
   return "Keep the existing collection unchanged. Fix exact Xenova TEI compatibility or create a separately named collection only after explicit approval.";
 }

@@ -29,7 +29,7 @@ func TestListCollectionsUsesReadOnlyEndpointAndReturnsSortedUniqueNames(t *testi
 	}))
 	defer server.Close()
 
-	collections, err := New(server.URL, "secret", "default", time.Second, nil).ListCollections(t.Context())
+	collections, err := New(server.URL, "secret", time.Second, testEmbedding(), nil).ListCollections(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestListCollectionsReturnsNonNilEmptySlice(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collections, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+	collections, err := New(server.URL, "", time.Second, testEmbedding(), nil).ListCollections(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"result": nil})
 		}))
 		defer server.Close()
-		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		_, err := New(server.URL, "", time.Second, testEmbedding(), nil).ListCollections(t.Context())
 		if !errors.Is(err, models.ErrQdrantUnavailable) {
 			t.Fatalf("error=%v", err)
 		}
@@ -70,7 +70,7 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 			json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{map[string]any{"name": " "}}}})
 		}))
 		defer server.Close()
-		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		_, err := New(server.URL, "", time.Second, testEmbedding(), nil).ListCollections(t.Context())
 		if !errors.Is(err, models.ErrQdrantUnavailable) {
 			t.Fatalf("error=%v", err)
 		}
@@ -81,7 +81,7 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 			http.Error(w, "unavailable", http.StatusServiceUnavailable)
 		}))
 		defer server.Close()
-		_, err := New(server.URL, "", "default", time.Second, nil).ListCollections(t.Context())
+		_, err := New(server.URL, "", time.Second, testEmbedding(), nil).ListCollections(t.Context())
 		if !errors.Is(err, models.ErrQdrantUnavailable) {
 			t.Fatalf("error=%v", err)
 		}
@@ -91,6 +91,10 @@ func TestListCollectionsWrapsInvalidAndHTTPResponses(t *testing.T) {
 func TestSearchBuildsFlatPayloadFilters(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeCompatibleSnapshot(w)
+			return
+		}
 		if r.URL.Path != "/collections/methodology_e5_small_v1/points/search" {
 			http.NotFound(w, r)
 			return
@@ -102,8 +106,8 @@ func TestSearchBuildsFlatPayloadFilters(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{"result": []any{map[string]any{"id": "1", "score": 0.8, "payload": map[string]any{"chunk_id": "chunk_1"}}}})
 	}))
 	defer server.Close()
-	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, nil)
-	hits, err := client.Search(t.Context(), SearchParams{Vector: []float64{1}, Limit: 8, ScoreThreshold: .65, Filters: models.Filters{RootPageID: "3035", Language: "ru"}})
+	client := New(server.URL, "secret", time.Second, testEmbedding(), nil)
+	hits, err := client.Search(t.Context(), SearchParams{Vector: []float64{1}, Collections: []string{"methodology_e5_small_v1"}, Limit: 8, ScoreThreshold: .65, Filters: models.Filters{RootPageID: "3035", Language: "ru"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +125,10 @@ func TestSearchFanoutsAcrossRequestedCollections(t *testing.T) {
 	seen := make(map[string]bool)
 	var seenMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeCompatibleSnapshot(w)
+			return
+		}
 		collection := r.URL.Path[len("/collections/"):]
 		collection = collection[:len(collection)-len("/points/search")]
 		seenMu.Lock()
@@ -134,7 +142,7 @@ func TestSearchFanoutsAcrossRequestedCollections(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(server.URL, "secret", "methodology_e5_small_v1", time.Second, nil)
+	client := New(server.URL, "secret", time.Second, testEmbedding(), nil)
 	hits, err := client.Search(t.Context(), SearchParams{
 		Vector:      []float64{1},
 		Limit:       8,
@@ -155,10 +163,30 @@ func TestSearchFanoutsAcrossRequestedCollections(t *testing.T) {
 
 func TestReadyValidatesCollection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"status": "green", "points_count": 1, "config": map[string]any{"params": map[string]any{"vectors": map[string]any{"size": 384, "distance": "Cosine"}}, "metadata": map[string]any{"embedding_model": models.EmbeddingModel, "embedding_model_revision": models.EmbeddingRevision}}}})
+		json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{}}})
 	}))
 	defer server.Close()
-	if err := New(server.URL, "", "collection", time.Second, nil).Ready(t.Context()); err != nil {
+	if err := New(server.URL, "", time.Second, testEmbedding(), nil).Ready(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeCompatibleSnapshot(w http.ResponseWriter) {
+	embedding := testEmbedding()
+	json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"status": "green", "points_count": 1, "config": map[string]any{"params": map[string]any{"vectors": map[string]any{"size": embedding.Dimension, "distance": "Cosine"}}, "metadata": map[string]any{
+		"embedding_model": embedding.ModelID, "embedding_model_revision": embedding.ModelRevision,
+		"embedding_dimension": embedding.Dimension, "embedding_dtype": embedding.DType,
+		"embedding_pooling": embedding.Pooling, "embedding_normalized": embedding.Normalized,
+		"document_prefix": embedding.DocumentPrefix, "embedding_pipeline_version": embedding.PipelineVersion,
+		"point_namespace": embedding.PointNamespace,
+	}}}})
+}
+
+func testEmbedding() models.EmbeddingConfig {
+	return models.EmbeddingConfig{
+		ModelID: "test-model", ModelRevision: "test-revision", Dimension: 4,
+		DType: "test-dtype", Pooling: "test-pooling", Normalized: true,
+		DocumentPrefix: "document: ", QueryPrefix: "query: ", MaxInputTokens: 32,
+		PipelineVersion: "test-pipeline", PointNamespace: "12345678-1234-1234-1234-123456789abc",
 	}
 }

@@ -12,51 +12,59 @@ import (
 func TestNewClient(t *testing.T) {
 	baseUrl := "http://localhost:8080"
 	options := Options{
-		ApiKey:     "test-api-key",
-		Collection: "test-collection",
+		ApiKey: "test-api-key",
 	}
 	client, err := New(baseUrl, options)
 	if err != nil {
 		t.Fatalf("Error creating client: %v", err)
 	}
-	if client.endpoint != "http://localhost:8080/v1/answer" {
-		t.Fatalf("Expected endpoint %s, got %s", "http://localhost:8080/v1/answer", client.endpoint)
+	if client.answerEndpoint != "http://localhost:8080/v1/answer" {
+		t.Fatalf("Expected endpoint %s, got %s", "http://localhost:8080/v1/answer", client.answerEndpoint)
+	}
+	if client.collectionsEndpoint != "http://localhost:8080/v1/collections" {
+		t.Fatalf("Expected endpoint %s, got %s", "http://localhost:8080/v1/collections", client.collectionsEndpoint)
 	}
 	if client.apiKey != options.ApiKey {
 		t.Fatalf("Expected apiKey %s, got %s", options.ApiKey, client.apiKey)
-	}
-	if client.collection != options.Collection {
-		t.Fatalf("Expected collection %s, got %s", options.Collection, client.collection)
 	}
 	t.Logf("Client created successfully: %v", client)
 }
 
 func TestCallAnswer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("Expected POST method, got %s", r.Method)
-		}
 		if r.Header.Get("Authorization") != "Bearer key" {
 			t.Fatalf("Expected Bearer authorization, got %q", r.Header.Get("Authorization"))
 		}
-		var req answerRequest
-		err := json.NewDecoder(r.Body).Decode(&req)
-		if err != nil {
-			t.Fatalf("Error decoding request body: %v", err)
+		switch r.URL.Path {
+		case "/v1/collections":
+			if r.Method != http.MethodGet {
+				t.Fatalf("Expected GET method, got %s", r.Method)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"collections":["workspace_1","workspace_2"]}`))
+		case "/v1/answer":
+			if r.Method != http.MethodPost {
+				t.Fatalf("Expected POST method, got %s", r.Method)
+			}
+			var req answerRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("Error decoding request body: %v", err)
+			}
+			if req.Query != "test query" {
+				t.Fatalf("Expected query 'test query', got '%s'", req.Query)
+			}
+			if len(req.Collections) != 2 || req.Collections[0] != "workspace_1" || req.Collections[1] != "workspace_2" {
+				t.Fatalf("Expected all collections, got %v", req.Collections)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"answer":"test answer"}`))
+		default:
+			t.Fatalf("Unexpected path %s", r.URL.Path)
 		}
-		if req.Query != "test query" {
-			t.Fatalf("Expected query 'test query', got '%s'", req.Query)
-		}
-		if len(req.Collections) != 1 || req.Collections[0] != "test" {
-			t.Fatalf("Expected collections ['test'], got %v", req.Collections)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"answer":"test answer"}`))
 	}))
 	t.Cleanup(server.Close)
 	client, _ := New(server.URL, Options{
-		ApiKey:     "key",
-		Collection: "test",
+		ApiKey: "key",
 	})
 	answer, err := client.Answer(context.Background(), "test query")
 	if err != nil {
@@ -70,23 +78,29 @@ func TestCallAnswer(t *testing.T) {
 func TestWrongHTTPStatusCode(t *testing.T) {
 	tests := []struct {
 		name       string
+		path       string
 		statusCode int
-		body       string
 	}{
-		{"500", 500, `{"error":"fail"}`},
-		{"404", 404, `{}`},
+		{"collections 500", "/v1/collections", 500},
+		{"answer 404", "/v1/answer", 404},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(test.statusCode)
-				_, _ = w.Write([]byte(test.body))
+				if r.URL.Path == test.path {
+					w.WriteHeader(test.statusCode)
+					return
+				}
+				if r.URL.Path == "/v1/collections" {
+					_, _ = w.Write([]byte(`{"collections":["test"]}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"answer":"test answer"}`))
 			}))
 			t.Cleanup(server.Close)
 
 			client, _ := New(server.URL, Options{
-				ApiKey:     "key",
-				Collection: "test",
+				ApiKey: "key",
 			})
 
 			_, err := client.Answer(context.Background(), "test query")
@@ -94,8 +108,40 @@ func TestWrongHTTPStatusCode(t *testing.T) {
 				t.Fatal("expected error")
 			}
 
-			if !strings.Contains(err.Error(), test.name) {
-				t.Fatalf("expected error to contain %s, got %v", test.name, err)
+			status := strings.Fields(test.name)[1]
+			if !strings.Contains(err.Error(), status) {
+				t.Fatalf("expected error to contain %s, got %v", status, err)
+			}
+		})
+	}
+}
+
+func TestInvalidCollectionsResponsePreventsAnswerRequest(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"invalid JSON", `{"collections":`},
+		{"empty list", `{"collections":[]}`},
+		{"missing list", `{}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			answerCalled := false
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/answer" {
+					answerCalled = true
+				}
+				_, _ = w.Write([]byte(test.body))
+			}))
+			t.Cleanup(server.Close)
+
+			client, _ := New(server.URL, Options{ApiKey: "key"})
+			if _, err := client.Answer(context.Background(), "test query"); err == nil {
+				t.Fatal("expected error")
+			}
+			if answerCalled {
+				t.Fatal("answer endpoint must not be called")
 			}
 		})
 	}

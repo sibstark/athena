@@ -13,10 +13,11 @@ import (
 )
 
 type TEIClient struct {
-	baseURL string
-	http    *http.Client
-	mu      sync.RWMutex
-	info    *teiInfo
+	baseURL   string
+	http      *http.Client
+	embedding EmbeddingConfig
+	mu        sync.RWMutex
+	info      *teiInfo
 }
 
 type teiInfo struct {
@@ -28,8 +29,8 @@ type teiInfo struct {
 	MaxClientBatchSize int    `json:"max_client_batch_size"`
 }
 
-func NewTEIClient(baseURL string, timeout time.Duration) *TEIClient {
-	return &TEIClient{baseURL: strings.TrimRight(baseURL, "/"), http: &http.Client{Timeout: timeout}}
+func NewTEIClient(baseURL string, timeout time.Duration, embedding EmbeddingConfig) *TEIClient {
+	return &TEIClient{baseURL: strings.TrimRight(baseURL, "/"), http: &http.Client{Timeout: timeout}, embedding: embedding}
 }
 
 func (client *TEIClient) Ready(ctx context.Context) error {
@@ -40,14 +41,17 @@ func (client *TEIClient) Ready(ctx context.Context) error {
 	if err := client.doJSON(ctx, http.MethodGet, "/info", nil, &info); err != nil {
 		return fmt.Errorf("TEI info: %w", err)
 	}
-	if info.ModelID != DefaultModel {
-		return fmt.Errorf("TEI model mismatch: expected %s, got %s", DefaultModel, info.ModelID)
+	if info.ModelID != client.embedding.ModelID {
+		return fmt.Errorf("TEI model mismatch: expected %s, got %s", client.embedding.ModelID, info.ModelID)
 	}
-	if info.ModelSHA != DefaultModelRevision {
-		return fmt.Errorf("TEI revision mismatch: expected %s, got %s", DefaultModelRevision, info.ModelSHA)
+	if info.ModelSHA != client.embedding.ModelRevision {
+		return fmt.Errorf("TEI revision mismatch: expected %s, got %s", client.embedding.ModelRevision, info.ModelSHA)
 	}
-	if info.AutoTruncate {
-		return fmt.Errorf("TEI auto_truncate must be false")
+	if info.MaxInputLength > 0 && info.MaxInputLength != client.embedding.MaxInputTokens {
+		return fmt.Errorf("TEI max input length mismatch: expected %d, got %d", client.embedding.MaxInputTokens, info.MaxInputLength)
+	}
+	if info.AutoTruncate != client.embedding.AutoTruncate {
+		return fmt.Errorf("TEI auto_truncate mismatch: expected %t, got %t", client.embedding.AutoTruncate, info.AutoTruncate)
 	}
 	client.mu.Lock()
 	client.info = &info
@@ -97,7 +101,7 @@ func (client *TEIClient) EmbedDocuments(ctx context.Context, inputs []string) ([
 		}
 		var vectors [][]float64
 		if err := client.doJSON(ctx, http.MethodPost, "/embed", map[string]any{
-			"inputs": inputs[start:end], "normalize": true, "truncate": false,
+			"inputs": inputs[start:end], "normalize": client.embedding.Normalized, "truncate": client.embedding.AutoTruncate,
 		}, &vectors); err != nil {
 			return nil, err
 		}
@@ -105,7 +109,7 @@ func (client *TEIClient) EmbedDocuments(ctx context.Context, inputs []string) ([
 			return nil, fmt.Errorf("TEI returned %d vectors for %d inputs", len(vectors), end-start)
 		}
 		for _, vector := range vectors {
-			if err := validateVector(vector); err != nil {
+			if err := validateVector(vector, client.embedding); err != nil {
 				return nil, err
 			}
 		}

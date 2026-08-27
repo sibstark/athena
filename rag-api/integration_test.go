@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sibstark/athena/rag-api/internal/config"
 	"github.com/sibstark/athena/rag-api/internal/deepseek"
 	"github.com/sibstark/athena/rag-api/internal/models"
 	"github.com/sibstark/athena/rag-api/internal/qdrant"
@@ -16,8 +17,15 @@ func TestRealTEIAndQdrant(t *testing.T) {
 	if os.Getenv("RUN_RAG_API_INTEGRATION") != "1" {
 		t.Skip("set RUN_RAG_API_INTEGRATION=1")
 	}
-	teiClient := tei.New(env("TEI_URL", "http://127.0.0.1:8080"), 30*time.Second, nil)
-	qdrantClient := qdrant.New(env("QDRANT_URL", "http://127.0.0.1:6333"), os.Getenv("QDRANT_API_KEY"), env("QDRANT_COLLECTION", "methodology_e5_small_v1"), 10*time.Second, nil)
+	if err := config.LoadEnvironment(); err != nil {
+		t.Fatal(err)
+	}
+	runtimeConfig, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	teiClient := tei.New(env("TEI_URL", "http://127.0.0.1:8080"), 30*time.Second, runtimeConfig.Embedding, nil)
+	qdrantClient := qdrant.New(env("QDRANT_URL", "http://127.0.0.1:6333"), os.Getenv("QDRANT_API_KEY"), 10*time.Second, runtimeConfig.Embedding, nil)
 	if err := teiClient.Ready(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +36,7 @@ func TestRealTEIAndQdrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits, err := qdrantClient.Search(t.Context(), qdrant.SearchParams{Vector: vector, Limit: 3, ScoreThreshold: -1, Filters: models.Filters{Language: "ru"}})
+	hits, err := qdrantClient.Search(t.Context(), qdrant.SearchParams{Vector: vector, Collections: []string{env("QDRANT_COLLECTION", "workspace_1")}, Limit: 3, ScoreThreshold: -1, Filters: models.Filters{Language: "ru"}})
 	if err != nil {
 		t.Fatal(err)
 	}

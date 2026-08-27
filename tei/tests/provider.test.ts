@@ -3,7 +3,7 @@ import { E5_MODEL_CONTRACT } from "../src/model-contract.js";
 import { assertValidVector, prefixInput } from "../src/providers/embedding-provider.js";
 import { TeiE5EmbeddingProvider } from "../src/providers/tei-e5-provider.js";
 
-const unit = () => [1, ...Array.from({ length: 383 }, () => 0)];
+const unit = () => [1, ...Array.from({ length: E5_MODEL_CONTRACT.dimension - 1 }, () => 0)];
 
 describe("TeiE5EmbeddingProvider", () => {
   it("adds exactly one query prefix and sends normalize=true/truncate=false", async () => {
@@ -20,8 +20,8 @@ describe("TeiE5EmbeddingProvider", () => {
     await provider.embedQueries(["query: вопрос"]);
     const embed = bodies.at(-1) as { inputs: string[]; normalize: boolean; truncate: boolean };
     expect(embed.inputs).toEqual(["query: вопрос"]);
-    expect(embed.normalize).toBe(true);
-    expect(embed.truncate).toBe(false);
+    expect(embed.normalize).toBe(E5_MODEL_CONTRACT.normalized);
+    expect(embed.truncate).toBe(E5_MODEL_CONTRACT.autoTruncate);
   });
 
   it("adds exactly one passage prefix", async () => {
@@ -36,8 +36,8 @@ describe("TeiE5EmbeddingProvider", () => {
       }),
     });
     await provider.embedDocuments(["passage: документ"]);
-    expect(inputs).toEqual(["passage: документ"]);
-    expect(prefixInput("query: текст", "document")).toBe("passage: текст");
+    expect(inputs).toEqual([`${E5_MODEL_CONTRACT.documentPrefix}документ`]);
+    expect(prefixInput("query: текст", "document")).toBe(`${E5_MODEL_CONTRACT.documentPrefix}текст`);
   });
 
   it("rejects another model or revision", async () => {
@@ -49,10 +49,11 @@ describe("TeiE5EmbeddingProvider", () => {
   });
 
   it("rejects wrong dimensions, NaN, Infinity, and unnormalized vectors", () => {
-    expect(() => assertValidVector([1], 384)).toThrow("dimension");
-    expect(() => assertValidVector([NaN, ...Array(383).fill(0)], 384)).toThrow("NaN");
-    expect(() => assertValidVector([Infinity, ...Array(383).fill(0)], 384)).toThrow("NaN");
-    expect(() => assertValidVector(Array(384).fill(0), 384)).toThrow("L2 norm");
+    const dimension = E5_MODEL_CONTRACT.dimension;
+    expect(() => assertValidVector([1], dimension)).toThrow("dimension");
+    expect(() => assertValidVector([NaN, ...Array(dimension - 1).fill(0)], dimension)).toThrow("NaN");
+    expect(() => assertValidVector([Infinity, ...Array(dimension - 1).fill(0)], dimension)).toThrow("NaN");
+    expect(() => assertValidVector(Array(dimension).fill(0), dimension)).toThrow("L2 norm");
   });
 
   it("rejects an input above max tokens before embed", async () => {
@@ -60,8 +61,8 @@ describe("TeiE5EmbeddingProvider", () => {
     const provider = new TeiE5EmbeddingProvider({
       baseUrl: "http://tei",
       fetchImpl: mockFetch((path) => {
-        if (path === "/info") return { ...info(), max_input_length: 1 };
-        if (path === "/tokenize") return [{ id: 1 }, { id: 2 }];
+        if (path === "/info") return info();
+        if (path === "/tokenize") return Array.from({ length: E5_MODEL_CONTRACT.maxInputTokens + 1 }, (_, id) => ({ id }));
         embed();
         return [unit()];
       }),
@@ -89,11 +90,11 @@ function info() {
   return {
     model_id: E5_MODEL_CONTRACT.modelId,
     model_sha: E5_MODEL_CONTRACT.revision,
-    model_dtype: "int8",
-    max_input_length: 512,
-    auto_truncate: false,
-    version: "1.9.3",
-    backend: "ort",
+    model_dtype: "test-dtype",
+    max_input_length: E5_MODEL_CONTRACT.maxInputTokens,
+    auto_truncate: E5_MODEL_CONTRACT.autoTruncate,
+    version: "test-version",
+    backend: "test-backend",
   };
 }
 

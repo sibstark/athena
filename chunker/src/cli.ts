@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import "dotenv/config";
 import { resolve } from "node:path";
 import { Command } from "commander";
 import { chunkNormalizedDocuments } from "./chunker.js";
@@ -18,24 +17,21 @@ const program = new Command()
   .option("--max-tokens <tokens>", "maximum embedding_text size", positiveInteger, 450)
   .option("--min-tokens <tokens>", "soft minimum embedding_text size", positiveInteger, 80)
   .option("--overlap-tokens <tokens>", "complete-block overlap", nonNegativeInteger, 50)
-  .option("--tokenizer <model>", "Hugging Face tokenizer or unicode-heuristic-v1")
-  .option("--tokenizer-revision <revision>", "pinned tokenizer revision")
-  .option("--tokenizer-cache <directory>", "local tokenizer cache")
   .option("--force", "replace existing output files", false)
   .showHelpAfterError();
 
 program.action(async (options: {
   run?: string; out?: string; input?: string; tree?: string; output?: string; report?: string;
   targetTokens: number; maxTokens: number; minTokens: number; overlapTokens: number;
-  tokenizer?: string; tokenizerRevision?: string; tokenizerCache?: string; force: boolean;
+  force: boolean;
 }) => {
   if (options.run || options.out) {
     if (!options.run || !options.out) throw new Error("Run mode requires both --run and --out.");
     if (options.input || options.tree || options.output || options.report) {
       throw new Error("Run mode cannot be combined with --input, --tree, --output, or --report.");
     }
-    if (options.tokenizer || options.tokenizerRevision || options.force) {
-      throw new Error("Run mode uses the pinned local tokenizer and atomically replaces its output; omit --tokenizer, --tokenizer-revision, and --force.");
+    if (options.force) {
+      throw new Error("Run mode atomically replaces its output; omit --force.");
     }
     const result = await chunkNormalizedRun({
       runDir: resolve(options.run),
@@ -44,7 +40,6 @@ program.action(async (options: {
       maxTokens: options.maxTokens,
       minTokens: options.minTokens,
       overlapTokens: options.overlapTokens,
-      ...(options.tokenizerCache ? { tokenizerCacheDir: resolve(options.tokenizerCache) } : {}),
       onProgress: console.log,
     });
     console.log(`Status: ${result.report.status}`);
@@ -70,9 +65,6 @@ program.action(async (options: {
     maxTokens: options.maxTokens,
     minTokens: options.minTokens,
     overlapTokens: options.overlapTokens,
-    ...(options.tokenizer ? { tokenizer: options.tokenizer } : {}),
-    ...(options.tokenizerRevision ? { tokenizerRevision: options.tokenizerRevision } : {}),
-    ...(options.tokenizerCache ? { tokenizerCacheDir: resolve(options.tokenizerCache) } : {}),
     force: options.force,
     onProgress: console.log,
   });

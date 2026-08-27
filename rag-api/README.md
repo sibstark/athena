@@ -8,18 +8,9 @@ POST /v1/search → TEI query embedding → Qdrant read-only search
 POST /v1/answer → тот же retrieval → ограниченный контекст → DeepSeek → проверка [S1]
 ```
 
-## Проверенный embedding contract
+## Embedding contract
 
-- model: `Xenova/multilingual-e5-small`
-- revision: `761b726dd34fb83930e26aab4e9ac3899aa1fa78`
-- query input: ровно один префикс `query: `
-- pooling: `mean`
-- normalization: `true`
-- dimension: `384`
-- truncation: запрещён
-- collection: `methodology_e5_small_v1`, Cosine
-
-Перед embedding клиент проверяет `/info` и `/tokenize`, затем вызывает `/embed` с `normalize=true` и `truncate=false`. Это повторяет прошедший `PASS_STRICT` compatibility test из `tei/`.
+Полный контракт модели задаётся только обязательными `EMBEDDING_*` в корневом `.env`. Перед embedding клиент сверяет `/info`, token limit и параметры коллекции Qdrant с этим контрактом. Значений модели и fallback в Go-коде нет.
 
 ## Конфигурация
 
@@ -59,7 +50,6 @@ openssl rand -base64 32
 | `AUTH_COOKIE_SECURE` | `false` локально; `true` только с HTTPS |
 | `TEI_URL` | `http://127.0.0.1:8080` на host |
 | `QDRANT_URL` | `http://127.0.0.1:6333` на host |
-| `QDRANT_COLLECTION` | `methodology_e5_small_v1`; эталонная коллекция для readiness-проверки, не fallback поисковых запросов |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | `deepseek-v4-flash` |
 | `DEEPSEEK_THINKING_ENABLED` | `false` |

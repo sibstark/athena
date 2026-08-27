@@ -15,7 +15,6 @@ func TestLoadRequiredEnvs(t *testing.T) {
 		"BOT_TOKEN",
 		"API_URL",
 		"API_KEY",
-		"COLLECTION",
 		"REQUEST_TIMEOUT_MS",
 	}
 
@@ -44,7 +43,6 @@ func TestMustContainsAllRequiredEnvs(t *testing.T) {
 	t.Setenv("BOT_TOKEN", "test-bot-token")
 	t.Setenv("API_URL", "http://localhost:8080/rag")
 	t.Setenv("API_KEY", "test-api-key")
-	t.Setenv("COLLECTION", "test-collection")
 	t.Setenv("REQUEST_TIMEOUT_MS", "5000")
 	cfg, err := Load()
 
@@ -61,7 +59,6 @@ func TestMustContainsAllRequiredEnvs(t *testing.T) {
 		BotToken:         "test-bot-token",
 		ApiUrl:           "http://localhost:8080/rag",
 		ApiKey:           "test-api-key",
-		Collection:       "test-collection",
 		RequestTimeoutMs: 5000,
 	}
 	if cfg != expectedCfg {
@@ -78,7 +75,6 @@ func TestLoadCustomLogDir(t *testing.T) {
 	t.Setenv("BOT_TOKEN", "test-bot-token")
 	t.Setenv("API_URL", "http://localhost:8080/rag")
 	t.Setenv("API_KEY", "test-api-key")
-	t.Setenv("COLLECTION", "test-collection")
 	t.Setenv("REQUEST_TIMEOUT_MS", "5000")
 	t.Setenv("LOG_DIR", " /var/log/athena ")
 
