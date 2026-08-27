@@ -187,8 +187,6 @@ services:
     volumes:
       - ./var/nginx-le/ssl:/etc/nginx/ssl
     depends_on:
-      web:
-        condition: service_healthy
       bot:
         condition: service_healthy
     healthcheck:
