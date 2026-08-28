@@ -2,14 +2,19 @@ package webhook
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/sibstark/athena/bot/internal/bitrix"
 )
 
 func TestCreateWebhookHandlerLogsInvalidPayload(t *testing.T) {
@@ -69,5 +74,43 @@ func TestSafeErrorMessageRemovesRequestURL(t *testing.T) {
 	}
 	if strings.Contains(message, "secret-token") {
 		t.Fatalf("safeErrorMessage() leaked URL: %q", message)
+	}
+}
+
+func TestReplyWithEmptyQuerySkipsAPIAndSendsPrompt(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Errorf("decode Bitrix request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+
+	bitrixClient, err := bitrix.New(server.URL, bitrix.Options{BotId: 7, BotToken: "token"})
+	if err != nil {
+		t.Fatalf("bitrix.New() error = %v", err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	reply(Options{
+		Api:    nil,
+		Bitrix: bitrixClient,
+		Logger: logger,
+		Options: WebhookOptions{
+			Context:   context.Background(),
+			TimeoutMs: 1000,
+		},
+	}, 789, "chat17", "")
+
+	fields, ok := received["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("Bitrix fields = %#v", received["fields"])
+	}
+	if fields["message"] != emptyQueryMessage {
+		t.Fatalf("Bitrix message = %q, want %q", fields["message"], emptyQueryMessage)
+	}
+	if fields["replyId"] != float64(789) {
+		t.Fatalf("Bitrix replyId = %#v", fields["replyId"])
 	}
 }

@@ -58,6 +58,47 @@ func TestFormatGroupedCitationsFallsBackPerSource(t *testing.T) {
 	}
 }
 
+func TestFormatSeparatesAdjacentCitationGroups(t *testing.T) {
+	sources := []Source{
+		{ID: "S2", URL: "https://example.test/document/2/"},
+		{ID: "S8", URL: "https://example.test/document/8/"},
+	}
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{
+			name: "without whitespace",
+			text: "Факт [S2][S8].",
+			want: "Факт <Источник 2|https://example.test/document/2/> <Источник 8|https://example.test/document/8/>.",
+		},
+		{
+			name: "normalizes horizontal whitespace",
+			text: "Факт [S2]   \t[S8].",
+			want: "Факт <Источник 2|https://example.test/document/2/> <Источник 8|https://example.test/document/8/>.",
+		},
+		{
+			name: "preserves newline",
+			text: "Источники:\n[S2]\n[S8]",
+			want: "Источники:\n<Источник 2|https://example.test/document/2/>\n<Источник 8|https://example.test/document/8/>",
+		},
+		{
+			name: "preserves punctuation",
+			text: "Первое [S2]; второе [S8].",
+			want: "Первое <Источник 2|https://example.test/document/2/>; второе <Источник 8|https://example.test/document/8/>.",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := Format(Result{Text: test.text, Sources: sources}, testRenderer{}); got != test.want {
+				t.Fatalf("Format() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestFormatUsesPlainLabelWhenSourceCannotBeLinked(t *testing.T) {
 	tests := []struct {
 		name    string

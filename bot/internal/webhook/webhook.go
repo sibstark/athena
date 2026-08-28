@@ -41,7 +41,10 @@ type BitrixEventChat struct {
 	DialogId string `json:"dialogId"`
 }
 
-var defaultFallbackMessage = "Извините, сейчас не удалось получить ответ. Попробуйте повторить запрос позже."
+var (
+	defaultFallbackMessage = "Извините, сейчас не удалось получить ответ. Попробуйте повторить запрос позже."
+	emptyQueryMessage      = "Напишите вопрос после упоминания Афины."
+)
 
 func CreateWebhookHandler(options Options) func(req *http.Request) (statusCode int, status string) {
 	logger := options.Logger
@@ -67,7 +70,8 @@ func CreateWebhookHandler(options Options) func(req *http.Request) (statusCode i
 			return http.StatusOK, "200 Success"
 		}
 
-		go reply(options, event.Message.Id, event.Chat.DialogId, event.Message.Text)
+		query := removeBotMentions(event.Message.Text, event.Bot.Id)
+		go reply(options, event.Message.Id, event.Chat.DialogId, query)
 
 		return http.StatusOK, "200 Success"
 	}
@@ -81,19 +85,23 @@ func reply(options Options, messageId int, dialogId string, message string) {
 		parent = context.Background()
 	}
 
-	ctx, cancel := context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
-	result, err := options.Api.Answer(ctx, message)
-	cancel()
 	messageText := ""
-	if err != nil {
-		logger.ErrorContext(parent, "answer request failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
-		messageText = defaultFallbackMessage
+	if message == "" {
+		messageText = emptyQueryMessage
 	} else {
-		messageText = answer.Format(result, bitrix.LinkRenderer{})
+		ctx, cancel := context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
+		result, err := options.Api.Answer(ctx, message)
+		cancel()
+		if err != nil {
+			logger.ErrorContext(parent, "answer request failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
+			messageText = defaultFallbackMessage
+		} else {
+			messageText = answer.Format(result, bitrix.LinkRenderer{})
+		}
 	}
 
-	ctx, cancel = context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
-	err = options.Bitrix.SendReply(ctx, messageId, dialogId, messageText)
+	ctx, cancel := context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
+	err := options.Bitrix.SendReply(ctx, messageId, dialogId, messageText)
 	cancel()
 	if err != nil {
 		logger.ErrorContext(parent, "Bitrix message send failed", "error", safeErrorMessage(err), "dialog_id", dialogId)

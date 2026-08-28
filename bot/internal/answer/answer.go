@@ -33,20 +33,39 @@ func Format(result Result, renderer LinkRenderer) string {
 		}
 	}
 
-	return citationGroupPattern.ReplaceAllStringFunc(result.Text, func(group string) string {
-		citations := citationPattern.FindAllStringSubmatch(group, -1)
-		formatted := make([]string, 0, len(citations))
-		for _, citation := range citations {
-			number := citation[1]
-			label := "Источник " + number
-			target, exists := sources["S"+number]
-			if exists && isHTTPURL(target) {
-				label = renderer.Link(label, target)
-			}
-			formatted = append(formatted, label)
+	matches := citationGroupPattern.FindAllStringIndex(result.Text, -1)
+	if len(matches) == 0 {
+		return result.Text
+	}
+
+	var formatted strings.Builder
+	lastEnd := 0
+	for index, match := range matches {
+		between := result.Text[lastEnd:match[0]]
+		if index > 0 && !strings.ContainsAny(between, "\r\n") && strings.Trim(between, " \t") == "" {
+			between = " "
 		}
-		return strings.Join(formatted, ", ")
-	})
+		formatted.WriteString(between)
+		formatted.WriteString(formatCitationGroup(result.Text[match[0]:match[1]], sources, renderer))
+		lastEnd = match[1]
+	}
+	formatted.WriteString(result.Text[lastEnd:])
+	return formatted.String()
+}
+
+func formatCitationGroup(group string, sources map[string]string, renderer LinkRenderer) string {
+	citations := citationPattern.FindAllStringSubmatch(group, -1)
+	formatted := make([]string, 0, len(citations))
+	for _, citation := range citations {
+		number := citation[1]
+		label := "Источник " + number
+		target, exists := sources["S"+number]
+		if exists && isHTTPURL(target) {
+			label = renderer.Link(label, target)
+		}
+		formatted = append(formatted, label)
+	}
+	return strings.Join(formatted, ", ")
 }
 
 func isHTTPURL(value string) bool {
