@@ -3,9 +3,13 @@ package answer
 import (
 	"net/url"
 	"regexp"
+	"strings"
 )
 
-var citationPattern = regexp.MustCompile(`\[S([1-9][0-9]*)\]`)
+var (
+	citationGroupPattern = regexp.MustCompile(`\[(S[1-9][0-9]*(?:\s*,\s*S[1-9][0-9]*)*)\]`)
+	citationPattern      = regexp.MustCompile(`S([1-9][0-9]*)`)
+)
 
 type Source struct {
 	ID  string `json:"source_id"`
@@ -29,15 +33,19 @@ func Format(result Result, renderer LinkRenderer) string {
 		}
 	}
 
-	return citationPattern.ReplaceAllStringFunc(result.Text, func(citation string) string {
-		matches := citationPattern.FindStringSubmatch(citation)
-		number := matches[1]
-		label := "Источник " + number
-		target, exists := sources["S"+number]
-		if !exists || !isHTTPURL(target) {
-			return label
+	return citationGroupPattern.ReplaceAllStringFunc(result.Text, func(group string) string {
+		citations := citationPattern.FindAllStringSubmatch(group, -1)
+		formatted := make([]string, 0, len(citations))
+		for _, citation := range citations {
+			number := citation[1]
+			label := "Источник " + number
+			target, exists := sources["S"+number]
+			if exists && isHTTPURL(target) {
+				label = renderer.Link(label, target)
+			}
+			formatted = append(formatted, label)
 		}
-		return renderer.Link(label, target)
+		return strings.Join(formatted, ", ")
 	})
 }
 

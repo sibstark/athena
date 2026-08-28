@@ -24,6 +24,40 @@ func TestFormatCitations(t *testing.T) {
 	}
 }
 
+func TestFormatGroupedCitations(t *testing.T) {
+	result := Result{
+		Text: "Общее утверждение [S1, S2, S4, S6].",
+		Sources: []Source{
+			{ID: "S1", URL: "https://example.test/document/1/"},
+			{ID: "S2", URL: "https://example.test/document/2/"},
+			{ID: "S4", URL: "https://example.test/document/4/"},
+			{ID: "S6", URL: "https://example.test/document/6/"},
+		},
+	}
+
+	got := Format(result, testRenderer{})
+	want := "Общее утверждение <Источник 1|https://example.test/document/1/>, <Источник 2|https://example.test/document/2/>, <Источник 4|https://example.test/document/4/>, <Источник 6|https://example.test/document/6/>."
+	if got != want {
+		t.Fatalf("Format() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatGroupedCitationsFallsBackPerSource(t *testing.T) {
+	result := Result{
+		Text: "Общее утверждение [S1,S2, S3].",
+		Sources: []Source{
+			{ID: "S1", URL: "https://example.test/document/1/"},
+			{ID: "S2", URL: "javascript:alert(1)"},
+		},
+	}
+
+	got := Format(result, testRenderer{})
+	want := "Общее утверждение <Источник 1|https://example.test/document/1/>, Источник 2, Источник 3."
+	if got != want {
+		t.Fatalf("Format() = %q, want %q", got, want)
+	}
+}
+
 func TestFormatUsesPlainLabelWhenSourceCannotBeLinked(t *testing.T) {
 	tests := []struct {
 		name    string
