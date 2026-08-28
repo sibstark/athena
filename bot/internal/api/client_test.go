@@ -57,7 +57,7 @@ func TestCallAnswer(t *testing.T) {
 				t.Fatalf("Expected all collections, got %v", req.Collections)
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"answer":"test answer"}`))
+			_, _ = w.Write([]byte(`{"answer":"test answer [S1]","sources":[{"source_id":"S1","url":"https://example.test/note/document/3515/","title":"ignored"}]}`))
 		default:
 			t.Fatalf("Unexpected path %s", r.URL.Path)
 		}
@@ -70,8 +70,11 @@ func TestCallAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Answer() error = %v", err)
 	}
-	if answer != "test answer" {
-		t.Fatalf("Answer() = %q", answer)
+	if answer.Text != "test answer [S1]" {
+		t.Fatalf("Answer().Text = %q", answer.Text)
+	}
+	if len(answer.Sources) != 1 || answer.Sources[0].ID != "S1" || answer.Sources[0].URL != "https://example.test/note/document/3515/" {
+		t.Fatalf("Answer().Sources = %#v", answer.Sources)
 	}
 }
 

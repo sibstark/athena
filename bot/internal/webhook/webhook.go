@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/sibstark/athena/bot/internal/answer"
 	"github.com/sibstark/athena/bot/internal/api"
 	"github.com/sibstark/athena/bot/internal/bitrix"
 )
@@ -81,15 +82,18 @@ func reply(options Options, messageId int, dialogId string, message string) {
 	}
 
 	ctx, cancel := context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
-	answer, err := options.Api.Answer(ctx, message)
+	result, err := options.Api.Answer(ctx, message)
 	cancel()
+	messageText := ""
 	if err != nil {
 		logger.ErrorContext(parent, "answer request failed", "error", safeErrorMessage(err), "dialog_id", dialogId)
-		answer = defaultFallbackMessage
+		messageText = defaultFallbackMessage
+	} else {
+		messageText = answer.Format(result, bitrix.LinkRenderer{})
 	}
 
 	ctx, cancel = context.WithTimeout(parent, time.Duration(options.Options.TimeoutMs)*time.Millisecond)
-	err = options.Bitrix.SendReply(ctx, messageId, dialogId, answer)
+	err = options.Bitrix.SendReply(ctx, messageId, dialogId, messageText)
 	cancel()
 	if err != nil {
 		logger.ErrorContext(parent, "Bitrix message send failed", "error", safeErrorMessage(err), "dialog_id", dialogId)

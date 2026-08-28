@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"github.com/sibstark/athena/bot/internal/answer"
 )
 
 type Options struct {
@@ -23,10 +25,6 @@ type APIClient struct {
 type answerRequest struct {
 	Query       string   `json:"query"`
 	Collections []string `json:"collections"`
-}
-
-type answerResponse struct {
-	Answer string `json:"answer"`
 }
 
 type collectionsResponse struct {
@@ -51,40 +49,40 @@ func New(baseUrl string, options Options) (*APIClient, error) {
 	}, nil
 }
 
-func (c *APIClient) Answer(ctx context.Context, query string) (string, error) {
+func (c *APIClient) Answer(ctx context.Context, query string) (answer.Result, error) {
 	collections, err := c.collections(ctx)
 	if err != nil {
-		return "", err
+		return answer.Result{}, err
 	}
 	body, err := json.Marshal(answerRequest{
 		Query:       query,
 		Collections: collections,
 	})
 	if err != nil {
-		return "", err
+		return answer.Result{}, err
 	}
 	req, err := http.NewRequestWithContext(ctx, "POST", c.answerEndpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return answer.Result{}, err
 	}
 	setHeaders(req, c.apiKey)
 	res, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return answer.Result{}, err
 	}
 	defer res.Body.Close()
 	if err := checkStatusCode(res); err != nil {
-		return "", err
+		return answer.Result{}, err
 	}
-	var answer answerResponse
-	err = json.NewDecoder(res.Body).Decode(&answer)
+	var result answer.Result
+	err = json.NewDecoder(res.Body).Decode(&result)
 	if err != nil {
-		return "", fmt.Errorf("Error decoding response: %w", err)
+		return answer.Result{}, fmt.Errorf("Error decoding response: %w", err)
 	}
-	if answer.Answer == "" {
-		return "", fmt.Errorf("empty answer")
+	if result.Text == "" {
+		return answer.Result{}, fmt.Errorf("empty answer")
 	}
-	return answer.Answer, nil
+	return result, nil
 }
 
 func (c *APIClient) collections(ctx context.Context) ([]string, error) {
